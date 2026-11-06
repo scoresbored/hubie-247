@@ -182,7 +182,7 @@ class GameDriver:
         details = {k: v for k, v in d.items()
                    if k not in skip and isinstance(v, (int, float, str, bool)) and len(str(v)) < 40}
         outcome = d.get("outcome", d.get("result"))
-        win = pm > 0
+        win = pm >= 1          # Plinko/Wheel pay e.g. 0.2x on every drop: only 1x+ counts as a hit
         if self.key in (None, "dice") and isinstance(outcome, (int, float)) and isinstance(d.get("rollOver"), (int, float)):
             direction = d.get("betDirection") or "over"
             win = outcome > d["rollOver"] if direction == "over" else outcome < d["rollOver"]
