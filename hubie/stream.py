@@ -31,6 +31,7 @@ class Streamer:
     def __init__(self, scene, offline=False):
         self.scene = scene
         self.offline = offline
+        self.lag = 0.0
 
     async def run(self):
         target = rtmp_target()
@@ -56,8 +57,11 @@ class Streamer:
                     # how many frames *should* have gone out by now (keeps real-time pace)
                     due = int((time.time() - started) * FPS) + 1
                     if due - sent > FPS * 3:          # badly stalled: skip ahead instead of bursting
-                        log("stream_skip", frames=due - sent)
+                        skip = due - 1 - sent
+                        log("stream_skip", frames=skip)
+                        MIXER.skip(skip)              # drop the same amount of audio so voice stays in sync
                         sent = due - 1
+                    self.lag = (due - sent) / FPS
                     raw = None
                     while sent < due:
                         chunk, _ = MIXER.next_chunk()

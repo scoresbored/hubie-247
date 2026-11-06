@@ -30,6 +30,8 @@ class Kick:
         self.tok = json.loads(TOKENS.read_text()) if TOKENS.exists() else {}
         self.me_id = None
         self.me_name = ""
+        self.follow_count = None      # last known follower count
+        self.last_named_follow = 0.0
         self.enabled = bool(self.client_id and self.secret and self.tok.get("refresh_token"))
 
     # ---------- auth ----------
@@ -71,6 +73,11 @@ class Kick:
         return bool(self.me_id)
 
     # ---------- write ----------
+    async def bot(self, text):
+        """A chat-bot message (moderation notes, polls, text replies). Marked so it's never
+        mistaken for Hubie himself, who only talks out loud."""
+        await self.say("🤖 " + text)
+
     async def say(self, text):
         try:
             r = await self._req("POST", "/chat", json={
@@ -90,7 +97,7 @@ class Kick:
             log("kick_mod_error", err=repr(e)[:200])
 
     # ---------- read ----------
-    async def read_chat(self, on_message):
+    async def read_chat(self, on_message, on_event=None):
         """Reads chat by opening Kick's own pop-out chat page in a browser and listening to the
         live messages Kick sends it. This keeps working even when Kick changes its chat servers.
         Calls on_message(username, user_id, text, message_id). Reconnects forever."""
@@ -101,6 +108,60 @@ class Kick:
         last_frame = [time.time()]
 
         samples = [0]
+        ev_samples = [0]
+
+        def name_of(o):
+            for k in ("username", "slug"):
+                if isinstance(o.get(k), str) and o[k]:
+                    return o[k]
+            for k in ("user", "follower", "subscriber", "sender", "gifter"):
+                v = o.get(k)
+                if isinstance(v, dict) and (v.get("username") or v.get("slug")):
+                    return v.get("username") or v.get("slug")
+            return None
+
+        def find_events(obj, depth=0):
+            """Follows / subs / gifted subs, whatever shape Kick sends them in."""
+            if depth > 8:
+                return
+            if isinstance(obj, str) and obj[:1] in "{[":
+                try:
+                    obj = json.loads(obj)
+                except Exception:
+                    return
+            if isinstance(obj, dict):
+                if "gifted_usernames" in obj or "giftees" in obj:
+                    to = obj.get("gifted_usernames") or [g.get("username") for g in obj.get("giftees", []) if isinstance(g, dict)]
+                    yield "gift", {"user": obj.get("gifter_username") or name_of(obj), "count": len(to or []) or 1}
+                    return
+                if "months" in obj and name_of(obj) and "content" not in obj:
+                    yield "sub", {"user": name_of(obj), "months": obj.get("months")}
+                    return
+                fc = obj.get("followersCount", obj.get("followers_count"))
+                if isinstance(fc, int) and obj.get("followed") is not False and "livestream" not in obj:
+                    yield "follow", {"user": name_of(obj), "count": fc}
+                    return
+                for v in obj.values():
+                    yield from find_events(v, depth + 1)
+            elif isinstance(obj, list):
+                for v in obj:
+                    yield from find_events(v, depth + 1)
+
+        async def emit(kind, info):
+            if not on_event:
+                return
+            if kind == "follow":
+                c = info.get("count")
+                if isinstance(c, int):
+                    if self.follow_count is not None and c <= self.follow_count:
+                        self.follow_count = c          # unfollow or repeat: nothing to celebrate
+                        return
+                    info["new"] = 1 if self.follow_count is None else c - self.follow_count
+                    self.follow_count = c
+                if info.get("user"):
+                    self.last_named_follow = time.time()
+            log("kick_event", kind=kind, **{k: v for k, v in info.items() if k != "raw"})
+            await on_event(kind, info)
 
         def find_messages(obj, depth=0):
             """Kick's chat format changes; just look for anything shaped like a chat message."""
@@ -141,9 +202,18 @@ class Kick:
                     if name.lower() == self.me_name:
                         continue
                     await on_message(name, sender.get("id"), d.get("content") or "", mid)
-            if not found and samples[0] < 8 and len(str(raw)) > 20:
-                samples[0] += 1
-                log("kick_frame_sample", data=str(raw)[:400])
+            if not found:
+                evs = []
+                for line in str(raw).splitlines():
+                    evs += list(find_events(line))
+                for kind, info in evs:
+                    await emit(kind, info)
+                if not evs and '"push"' in str(raw) and ev_samples[0] < 40:
+                    ev_samples[0] += 1                  # learn shapes of other live events
+                    log("kick_event_sample", data=str(raw)[:600])
+                elif not evs and samples[0] < 8 and len(str(raw)) > 20:
+                    samples[0] += 1
+                    log("kick_frame_sample", data=str(raw)[:400])
 
         pw = await async_playwright().start()
         while True:
@@ -161,8 +231,24 @@ class Kick:
                 log("kick_chat_connected", via="popout page")
                 # Kick sends pings regularly; if nothing at all arrives for 5 min, reload.
                 last_frame[0] = time.time()
+                next_poll = 0
                 while time.time() - last_frame[0] < 300:
                     await asyncio.sleep(10)
+                    if on_event and time.time() > next_poll:     # backup: watch the follower count
+                        next_poll = time.time() + 45
+                        try:
+                            c = await page.evaluate(
+                                "s => fetch('/api/v2/channels/' + s).then(r => r.json())"
+                                ".then(j => j.followers_count ?? j.followersCount ?? null).catch(() => null)", slug)
+                        except Exception:
+                            c = None
+                        if isinstance(c, int):
+                            if self.follow_count is None:
+                                self.follow_count = c
+                            elif c > self.follow_count and time.time() - self.last_named_follow > 60:
+                                await emit("follow", {"user": None, "count": c})
+                            else:
+                                self.follow_count = c
                 log("kick_chat_down", err="no websocket frames for 5 min, reloading")
             except Exception as e:
                 log("kick_chat_down", err=repr(e)[:200])

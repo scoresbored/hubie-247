@@ -2,7 +2,7 @@
 # One-time setup for Hubie v1. Run as root:  bash /opt/hubie/app/setup.sh
 set -euo pipefail
 V=/opt/hubie/voices
-sudo -u hubie /opt/hubie/venv/bin/pip install --quiet httpx pillow piper-tts websockets
+sudo -u hubie /opt/hubie/venv/bin/pip install --quiet httpx pillow piper-tts websockets numpy
 install -d -o hubie -g hubie "$V" /opt/hubie/logs
 BASE=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/high
 for f in en_US-ryan-high.onnx en_US-ryan-high.onnx.json; do

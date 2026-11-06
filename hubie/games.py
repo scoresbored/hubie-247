@@ -26,9 +26,9 @@ GAMES = {
         {"name": "medium risk", "risk": "Medium"},
         {"name": "high risk", "risk": "High"},
     ]},
-    "maxwin": {"name": "Max Win", "url": BASE + "max-win", "strategies": [{"name": "default settings"}]},
-    "plinko": {"name": "Plinko", "url": BASE + "plinko", "strategies": [{"name": "default settings"}]},
-    "coinflip": {"name": "Coinflip", "url": BASE + "coin-flip", "strategies": [{"name": "default settings"}]},
+    "maxwin": {"name": "Max Win", "url": BASE + "max-win", "strategies": [{"name": "classic"}]},
+    "plinko": {"name": "Plinko", "url": BASE + "plinko", "strategies": [{"name": "classic"}]},
+    "coinflip": {"name": "Coinflip", "url": BASE + "coin-flip", "strategies": [{"name": "classic"}]},
 }
 
 

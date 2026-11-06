@@ -10,7 +10,7 @@ import random
 import re
 import time
 
-from . import chatmod, safety
+from . import chatfun, chatmod, safety
 from .brain import Brain
 from .config import GAME_URL, LOG_DIR
 from .game import GameDriver, NonZeroBet
@@ -28,8 +28,15 @@ BANTER = ["why sloths make great dice players", "the 3am crowd", "what Hubie doe
 SPEECH = asyncio.Lock()
 
 
-async def say(scene, voice, brain, line):
+async def say(scene, voice, brain, line, max_age=20):
+    """Speak a line. If Hubie is busy and the line waits longer than max_age seconds,
+    it's dropped instead of being said late (so he never falls behind what's happening)."""
+    asked = time.time()
     async with SPEECH:
+        waited = time.time() - asked
+        if waited > max_age:
+            log("say_dropped", line=line[:80], waited=round(waited, 1))
+            return
         await _say(scene, voice, brain, line)
 
 
@@ -73,14 +80,83 @@ async def chat_worker(scene, voice, brain, kick, chat_q):
             question = "?" in text and len(text) > 10
             mentions = "hubie" in text.lower()
             gap = time.time() - last_spoken
-            speak_it = (first_time and gap > 20) or ((question or mentions) and gap > 40)
-        scene.add_chat("Hubie", line)
-        if kick:
-            await kick.say(line)
+            speak_it = first_time or ((question or mentions) and gap > 40)   # always say hi to newcomers
         log("chat_reply", to=user, spoken=speak_it, first_time=first_time, secs=round(time.time() - ts, 1))
-        if speak_it:
+        if speak_it:                                   # Hubie answers out loud (no chat-bot text)
             last_spoken = time.time()
-            await say(scene, voice, brain, line)
+            scene.add_chat("Hubie", line)
+            await say(scene, voice, brain, line, max_age=25)
+        else:                                          # quick text answer from the chat bot
+            scene.add_chat("HubieBot", line)
+            if kick:
+                await kick.bot(line)
+
+
+ALERT_TEMPLATES = {
+    "follow": ("Thank you for the follow, {u}! Welcome to the branch.", "Thanks for the follow, whoever that was! Welcome in."),
+    "sub": ("{u}, thank you for subscribing! Top hat tip to you.", "Thanks for the sub!"),
+    "gift": ("{u}, thank you for gifting {n} subs! Absolute legend.", "Thanks for the gifted subs!"),
+}
+BOT_ALERTS = {
+    "follow": ("Thanks for the follow, @{u}! 🦥", "Thanks for the follow! 🦥"),
+    "sub": ("@{u} just subscribed! Thank you! 🎩", "New subscriber! Thank you! 🎩"),
+    "gift": ("@{u} gifted {n} subs! Thank you! 🎁", "Gifted subs! Thank you! 🎁"),
+}
+
+
+async def alert(scene, voice, brain, kick, kind, info):
+    """Follows, subs and gifts: the chat bot posts it, and Hubie always thanks them out loud."""
+    user, n = info.get("user"), info.get("count") if kind == "gift" else info.get("new", 1)
+    named, anon = BOT_ALERTS[kind]
+    msg = (named if user else anon).format(u=user, n=n)
+    scene.add_chat("HubieBot", msg)
+    if kick:
+        await kick.bot(msg)
+    extra = f"{info.get('months')} months" if kind == "sub" and info.get("months") else (f"{n} subs" if kind == "gift" else "")
+    line = safety.clean(await brain.alert(kind, user, extra))
+    if not line:
+        t_named, t_anon = ALERT_TEMPLATES[kind]
+        line = (t_named if user else t_anon).format(u=user, n=n)
+    await say(scene, voice, brain, line, max_age=45)
+
+
+class ChatState:
+    def __init__(self):
+        self.poll = None
+        self.pending = None                 # (game_key, strategy, note) chosen by chat
+        self.suggestions = chatfun.Suggestions()
+
+
+async def run_poll(scene, voice, brain, kick, state, benched, current):
+    from .games import GAMES
+    poll = chatfun.make_poll(benched, current)
+    if len(poll.options) < 2:
+        return
+    state.poll = poll
+    n = len(poll.options)
+    listing = "   ".join(f"{i + 1}) {poll.label(i)}" for i in range(n))
+    log("poll_start", options=[poll.label(i) for i in range(n)])
+    if kick:
+        await kick.bot(f"POLL: what should Hubie play next? Type 1-{n} in chat.   {listing}")
+    await say(scene, voice, brain, max_age=40, line=f"Chat, you're picking my next game. Type a number from one to {['', 'one', 'two', 'three', 'four'][n]}, the options are on screen.")
+    while poll.active:
+        scene.set_poll((f"Next game? Type 1-{n}", [(poll.label(i), v) for i, v in enumerate(poll.tally())],
+                        max(0, int(poll.ends - time.time()))))
+        await asyncio.sleep(1)
+    poll.done = True
+    (key, strat), tally = poll.winner()
+    scene.set_poll(None)
+    state.poll = None
+    log("poll_end", tally=tally, winner=key)
+    if sum(tally) == 0:
+        if kick:
+            await kick.bot("Poll closed with no votes, so Hubie picks. Next poll soon!")
+        return
+    state.pending = (key, strat, "picked by chat")
+    label = f"{GAMES[key]['name']} ({strat['name']})"
+    if kick:
+        await kick.bot(f"Poll closed: {label} wins with {max(tally)} vote{'s' if max(tally) != 1 else ''}. Up next!")
+    await say(scene, voice, brain, max_age=40, line=f"Chat has spoken. {GAMES[key]['name']}, {strat['name']}, is up next.")
 
 
 class Moments:
@@ -125,19 +201,32 @@ def pick_segment(benched, recent):
     return key, random.choice(GAMES[key]["strategies"])
 
 
-async def director(scene, game, voice, brain, kick=None, chat_q=None):
+async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None):
+    from .games import GAMES
+    state = state or ChatState()
     benched, recent = {}, []
+    seg_no = 0
     last_spoke = time.time()
     last_rg = time.time()
 
-    async def speak(line):
+    async def speak(line, max_age=12):
         nonlocal last_spoke
-        await say(scene, voice, brain, line)
+        await say(scene, voice, brain, line, max_age)
         last_spoke = time.time()
 
     await speak("Hubie here. Grab a branch, we're playing some House originals in demo mode. Eighteen plus, zero real money.")
     while True:
-        key, strat = pick_segment(benched, recent)
+        note = ""
+        req = None if state.pending else state.suggestions.take(benched)
+        if state.pending and benched.get(state.pending[0], 0) < time.time():
+            key, strat, note = state.pending
+        elif req:
+            key, who = req
+            strat, note = random.choice(GAMES[key]["strategies"]), f"requested by {who} in chat"
+        else:
+            key, strat = pick_segment(benched, recent)
+        state.pending = None
+        seg_no += 1
         recent.append(key)
         try:
             await game.switch(key, strat)
@@ -149,8 +238,15 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None):
         scene.set_status(f"Now playing: {game.name} - {strat['name']}")
         m = Moments()
         scene.reset_session()
-        line = safety.clean(await brain.segment(game.name, strat["name"], "start"))
+        label = strat["name"] + (f" ({note})" if note else "")
+        line = safety.clean(await brain.segment(game.name, label, "start"))
         await speak(line or f"Switching it up. {game.name}, {strat['name']}. Let's see what happens.")
+        if seg_no % 2 == 0 and kick:                     # every other segment, let chat pick what's next
+
+            async def later_poll(k=key):
+                await asyncio.sleep(180)
+                await run_poll(scene, voice, brain, kick, state, benched, k)
+            asyncio.create_task(later_poll())
         seg_end = time.time() + random.uniform(8, 15) * 60      # 8-15 minutes per segment
         fails = 0
         while time.time() < seg_end:
@@ -183,7 +279,7 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None):
                 else:
                     await speak(line)
             if time.time() - last_rg > 600:                  # responsible-gambling reminder every ~10 min
-                await speak(safety.rg_line())
+                await speak(safety.rg_line(), max_age=120)
                 last_rg = time.time()
             elif time.time() - last_spoke > 75:              # never dead air for long
                 extra = safety.clean(await brain.banter(random.choice(BANTER)))
@@ -194,6 +290,19 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None):
             line = safety.clean(await brain.segment(game.name, strat["name"], "end", m.summary()))
             if line:
                 await speak(line)
+
+
+async def sync_check(streamer, every=300):
+    """Every 5 minutes: make sure voice and picture are still together, and fix it if not."""
+    from .audio import MIXER
+    while True:
+        await asyncio.sleep(every)
+        backlog, lag = MIXER.backlog(), getattr(streamer, "lag", 0.0)
+        log("sync_check", audio_backlog_s=round(backlog, 2), video_lag_s=round(lag, 2),
+            waiting_lines=len(SPEECH._waiters or []))
+        if backlog > 15:                          # nothing Hubie says is that long: something piled up
+            MIXER.skip(int((backlog - 1) * 30))
+            log("resync", dropped_audio_s=round(backlog - 1, 1))
 
 
 async def previewer(scene, every=30):
@@ -215,7 +324,7 @@ async def main(offline):
     game = GameDriver(GAME_URL, scene.set_game_jpeg)
     voice, brain = Voice(), Brain()
     streamer = Streamer(scene, offline=offline)
-    tasks = [asyncio.create_task(streamer.run())]
+    tasks = [asyncio.create_task(streamer.run()), asyncio.create_task(sync_check(streamer))]
     tasks.append(asyncio.create_task(previewer(scene, every=10 if offline else 30)))
     while True:
         try:
@@ -225,6 +334,14 @@ async def main(offline):
             log("game_start_error", err=repr(e)[:200])
             scene.set_caption("Hubie is stretching. One sec...")
             await asyncio.sleep(15)
+    try:
+        from .audio import MIXER
+        from .music import ensure_tracks
+        MIXER.set_music(await asyncio.get_running_loop().run_in_executor(None, ensure_tracks))
+        log("music_ready", tracks=len(MIXER.tracks), volume=MIXER.music_vol)
+    except Exception as e:
+        log("music_error", err=repr(e)[:200])
+    state = ChatState()
     kick, chat_q = None, asyncio.Queue()
     try:
         k = Kick()
@@ -232,19 +349,32 @@ async def main(offline):
             kick = k
 
             async def on_message(user, user_id, text, msg_id):
+                if state.poll and state.poll.vote(user, text):        # votes: counted, not answered
+                    return
                 verdict = chatmod.check(user, text)
                 if verdict:
                     minutes, reason = verdict
                     await kick.timeout(user_id, minutes, reason)
+                    await kick.bot(f"@{user} timed out for {minutes} min: {reason}.")
                     return
                 scene.add_chat(user, text)
+                got = state.suggestions.add(user, text)
+                if got is not None:                                   # !play <game>
+                    from .games import GAMES
+                    names = ", ".join(g["name"] for g in GAMES.values())
+                    await kick.bot(f"@{user} got it, {GAMES[got]['name']} is on Hubie's request list." if got
+                                   else f"@{user} try !play followed by one of: {names}")
+                    return
                 await chat_q.put((user, text, time.time()))
 
-            tasks.append(asyncio.create_task(kick.read_chat(on_message)))
+            async def on_event(kind, info):
+                asyncio.create_task(alert(scene, voice, brain, kick, kind, info))
+
+            tasks.append(asyncio.create_task(kick.read_chat(on_message, on_event)))
     except Exception as e:
         log("kick_start_error", err=repr(e)[:200])
     tasks.append(asyncio.create_task(chat_worker(scene, voice, brain, kick, chat_q)))
-    tasks.append(asyncio.create_task(director(scene, game, voice, brain, kick, chat_q)))
+    tasks.append(asyncio.create_task(director(scene, game, voice, brain, kick, chat_q, state)))
     done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
     for t in done:
         t.result()   # surfaces the crash; run.sh restarts us

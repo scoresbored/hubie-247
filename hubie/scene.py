@@ -79,6 +79,7 @@ class Scene:
         self.blink_until = 0
         self.stats = {"rounds": 0, "hits": 0}
         self.history = []          # recent (outcome, win) for the bottom strip
+        self.poll = None           # (title, [(label, votes)], seconds_left) while a poll runs
         self._base = None
         self._dirty = True
         self.art = self._load_art()
@@ -127,6 +128,10 @@ class Scene:
             self.history = (self.history + [(shown, ev["win"])])[-12:]
             self._dirty = True
 
+    def set_poll(self, poll):
+        with self.lock:
+            self.poll, self._dirty = poll, True
+
     def reset_session(self):
         with self.lock:
             self.stats = {"rounds": 0, "hits": 0}
@@ -154,18 +159,32 @@ class Scene:
         for outcome, win in reversed(self.history):
             label = f"{outcome:.2f}" if isinstance(outcome, (int, float)) else str(outcome)
             w = d.textlength(label, font=self.f_small_b) + 22
-            if x + w > CAPTION_BOX[2] - 16:
+            if x + w > (548 if self.poll else CAPTION_BOX[2] - 16):
                 break
             d.rounded_rectangle((x, y0 + 86, x + w, y0 + 118), 14, fill=GREEN if win else RED)
             d.text((x + 11, y0 + 91), label, font=self.f_small_b, fill=(10, 20, 25))
             x += w + 8
+        # poll box over the right side of the bottom strip
+        if self.poll:
+            title, opts, left = self.poll
+            px = 560
+            d.rounded_rectangle((px, y0 + 10, CAPTION_BOX[2] - 12, y0 + 140), 12, fill=(20, 45, 60))
+            d.text((px + 14, y0 + 16), f"{title}  ·  {left}s", font=self.f_small_b, fill=TEAL)
+            total = max(1, sum(v for _, v in opts))
+            for i, (label, v) in enumerate(opts):
+                yy = y0 + 44 + i * 30
+                d.text((px + 14, yy), f"{i + 1}", font=self.f_small_b, fill=WHITE)
+                bw = int((CAPTION_BOX[2] - px - 200) * v / total)
+                d.rounded_rectangle((px + 36, yy + 2, px + 36 + max(6, bw), yy + 22), 8, fill=GREEN if v else (40, 70, 85))
+                d.text((px + 44 + max(6, bw), yy), f"{label}  {v}", font=self.f_small, fill=WHITE)
         # right column: title + chat
         d.rectangle((SIDE_X, 0, W, BANNER_Y), fill=PANEL)
         d.text((SIDE_X + 16, 332), "HUBIE  LIVE 24/7", font=self.f_title, fill=TEAL)
         d.line((SIDE_X + 16, 366, W - 16, 366), fill=(40, 70, 85), width=1)
         y = 374
         for user, text in self.chat[-8:]:
-            d.text((SIDE_X + 16, y), user, font=self.f_small_b, fill=TEAL)
+            d.text((SIDE_X + 16, y), user, font=self.f_small_b,
+                   fill=(255, 196, 90) if user == "HubieBot" else TEAL)
             for ln in _wrap(d, text, self.f_small, 285)[:2]:
                 y += 21
                 d.text((SIDE_X + 16, y), ln, font=self.f_small, fill=WHITE)

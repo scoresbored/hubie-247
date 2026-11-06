@@ -13,7 +13,8 @@ chats with viewers by name, moderates chat, and restarts himself when something 
 | On screen | Animated Hubie (mouth moves with his voice, blinks, reacts green/red to hits and misses), the live game, recent results, chat, and a permanent 18+ / demo / gamble-responsibly banner |
 | Plays | Rotates every 8-15 min between House originals and strategies: Dice (1.5x / 2x / 10x / 50x), Limbo (2x-100x targets), Wheel (low/medium/high risk), Max Win, Plinko, Coinflip |
 | Talks | Comments only on real moments (win streaks, long losing streaks, big hits, droughts ending, milestones), announces and recaps each segment, never leaves long dead air |
-| Chat | Reads Kick chat, replies by name in text; speaks only to first-time chatters and real questions |
+| Chat | Reads Kick chat. Hubie speaks to first-time chatters and real questions; a separate 🤖 chat bot handles text replies, moderation notices and polls. Chat picks games with polls (vote 1-3) and `!play <game>` requests. Follows, subs and gifted subs get a bot post and a spoken thank-you; first-time chatters always get a spoken hello |
+| Music | Original lo-fi background loops generated in code (no third-party tracks), low volume, ducks under Hubie's voice |
 | Moderates | Times out links, promo/referral spam, slurs, caps and repeat spam; answers "I'm under 18" with the 18+ rule |
 | Stays safe | Every line passes a filter that blocks win promises, deposit/bonus/code talk and money amounts; every bet is checked to be $0 before the click and again in the site's reply |
 | Runs itself | Restarts crashed parts on its own: the stream (ffmpeg), the game browser, the chat reader, the whole app; benches a game for an hour if it keeps failing |
@@ -30,7 +31,9 @@ safety.py filter every spoken/posted line; responsible-gambling lines
 voice.py  local text-to-speech + mouth-movement envelope
 scene.py  draws every frame (game, Hubie art, results, chat, banner)
 stream.py pipes frames + voice into ffmpeg -> Kick (auto-restarts)
-audio.py  mixer: exactly one frame of audio per video frame, drives the mouth
+audio.py  mixer: exactly one frame of audio per video frame, music bed with ducking, drives the mouth
+music.py  generates original lo-fi background loops (numpy)
+chatfun.py chat polls + !play requests
 kick.py   Kick chat in (pop-out chat feed) and out (official Kick API), timeouts
 chatmod.py chat moderation rules
 main.py   the director: segments, moments, chat worker, no-dead-air, RG reminders
