@@ -44,7 +44,8 @@ stream key and a Kick developer app, an Anthropic API key, and a Housebets accou
 
 1. **Prepare the server** (as root): `bash deploy/bootstrap.sh`
    Installs Xvfb, PulseAudio, ffmpeg, Python, Playwright Chromium, firewall, swap, and turns off surprise reboots.
-2. **Install Hubie**: copy this repo to `/opt/hubie/app`, then `bash /opt/hubie/app/setup.sh`
+2. **Install Hubie**: `sudo -u hubie git clone https://github.com/scoresbored/hubie-247.git /opt/hubie/app`,
+   then `bash /opt/hubie/app/setup.sh`. Later updates: `./update.sh` (git pull + restart) or `/update` in Telegram
    (Python packages + the voice model).
 3. **Secrets**: copy `.env.example` to `/opt/hubie/.env`, fill it in, `chmod 600`. Never commit it.
    Get `KICK_CHATROOM_ID` from `https://kick.com/api/v2/channels/<your-channel>` (`chatroom.id`).
@@ -86,5 +87,5 @@ art/        Hubie head art + mouth/eye positions
 deploy/     bootstrap.sh (server prep), hubie.service (optional systemd)
 tools/      spike.py (game recon / endurance test / one-time login), find_pack.py
 docs/       architecture diagram
-run.sh start.sh stop.sh setup.sh
+run.sh start.sh stop.sh setup.sh update.sh bot.sh
 ```

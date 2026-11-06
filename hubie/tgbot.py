@@ -33,7 +33,7 @@ HELP = (
     "/chat - recent chat replies\n"
     "/run - contest run timer (start/end it)\n\n"
     "<b>Controls</b> (during the contest run these RESET the run)\n"
-    "/start  /stop  /restart"
+    "/start  /stop  /restart  /update (pull latest code from GitHub + restart)"
 )
 
 
@@ -164,7 +164,7 @@ class Bot:
 
     async def do(self, chat, action):
         st = run_state()
-        if st.get("run_started") and action in ("stop", "restart", "start"):
+        if st.get("run_started") and action in ("stop", "restart", "start", "update"):
             st["reset_by"] = action
             st.pop("run_started", None)
             STATE.write_text(json.dumps(st))
@@ -177,6 +177,11 @@ class Bot:
             await self.script(chat, "stop")
             await asyncio.sleep(3)
             await self.script(chat, "start")
+        elif action == "update":
+            await self.script(chat, "update")
+            await self.send(chat, "🤖 Restarting the bot to load any bot changes...")
+            await asyncio.sleep(1)
+            os._exit(0)                     # bot.sh's loop starts the new version in 5s
         elif action == "runstart":
             STATE.write_text(json.dumps({"run_started": time.time()}))
             await self.send(chat, "⏱ Contest run timer started. Hands off from here! Only read-only commands now.")
@@ -252,7 +257,7 @@ class Bot:
             else:
                 await self.send(chat, "Start the contest run timer now? From then on, /start /stop /restart will warn you.",
                                 [[("Start run timer", "do:runstart"), ("Cancel", "cancel")]])
-        elif cmd in ("/start", "/stop", "/restart"):
+        elif cmd in ("/start", "/stop", "/restart", "/update"):
             await self.confirm(chat, cmd[1:])
         else:
             await self.send(chat, HELP)
@@ -265,7 +270,7 @@ class Bot:
                 ("status", "Is Hubie live + health"), ("preview", "Current stream picture"),
                 ("logs", "What he said and did"), ("errors", "Recent problems"), ("chat", "Recent chat replies"),
                 ("run", "Contest run timer"), ("start", "Start Hubie"), ("stop", "Stop Hubie"),
-                ("restart", "Restart Hubie")]])
+                ("restart", "Restart Hubie"), ("update", "Pull latest code + restart")]])
         for a in ADMINS:
             try:
                 await self.send(a, "🦥 Hubie control bot is online. /status")
