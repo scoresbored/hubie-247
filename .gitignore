@@ -1,0 +1,11 @@
+.env
+profile/
+hubie_profile/
+logs/
+voices/
+spike_out/
+*.wav
+*.tgz
+__pycache__/
+run_state.json
+kick_tokens.json

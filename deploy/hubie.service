@@ -1,0 +1,17 @@
+# Optional: run Hubie as a system service so he also comes back after a server reboot.
+# sudo cp deploy/hubie.service /etc/systemd/system/ && sudo systemctl enable --now hubie
+[Unit]
+Description=Hubie 24/7 AI streamer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=hubie
+WorkingDirectory=/opt/hubie/app
+ExecStart=/opt/hubie/app/run.sh
+Restart=always
+RestartSec=5
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
