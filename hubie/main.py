@@ -225,12 +225,17 @@ def react_to(scene, reason):
     """Pick Hubie's face for a notable round (the Moments reason text)."""
     if reason.startswith("a big hit"):
         scene.react("shocked", 1.3, then=[("cheering", 3.5)])
+        scene.effect("confetti", 3.5)
     elif reason.startswith("finally a hit"):
         scene.react("cheering", 3.0)
     elif "hits in a row" in reason:
-        scene.react("cheering" if int(reason.split()[0]) >= 7 else "laughing", 3.0)
+        streak = int(reason.split()[0])
+        scene.react("cheering" if streak >= 7 else "laughing", 3.0)
+        if streak >= 5:
+            scene.effect("confetti", 2.5)
     elif "misses in a row" in reason:
         scene.react("facepalm", 3.5)
+        scene.effect("rain", 5.0)
     elif reason.startswith("round "):
         scene.react("happy", 2.5)
 
@@ -370,6 +375,7 @@ async def run_giveaway(scene, voice, brain, kick, state, prize, minutes):
             await kick.bot("Giveaway closed with no entries. Next time!")
         return
     scene.react("shocked", 1.2, then=[("cheering", 3.5)])
+    scene.effect("confetti", 4.0)
     if kick:
         await kick.bot(f"🎉 @{winner} wins the giveaway: {prize}! ({len(g.entrants)} entered)")
     await say(scene, voice, brain, max_age=40, line=f"And the winner is {winner}! Congrats, enjoy your {prize}.")

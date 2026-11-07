@@ -86,6 +86,7 @@ class Scene:
         from . import theme
         self._theme = theme
         self.pal = theme.palette(time.time())
+        self.confetti = None
         self.avatar = None
         try:
             from . import avatar
@@ -129,6 +130,8 @@ class Scene:
 
     def on_event(self, ev):
         with self.lock:
+            if self.avatar:
+                self.avatar.on_round(time.time())
             self.mood = "hit" if ev["win"] else "miss"
             self.mood_until = time.time() + 2.5
             self.stats["rounds"] += 1
@@ -148,6 +151,42 @@ class Scene:
             self.stats = {"rounds": 0, "hits": 0}
             self.history = []
             self._dirty = True
+
+    def effect(self, kind, secs=3.5):
+        """Screen effects: "confetti" (big hits, streaks, giveaway winners) or "rain" (cloud over Hubie)."""
+        now = time.time()
+        with self.lock:
+            if kind == "confetti":
+                self.confetti = (now, now + secs, random.randrange(10 ** 6))
+            elif kind == "rain" and self.avatar:
+                self.avatar.rain(secs, now)
+
+    def _draw_confetti(self, img, now):
+        t0, until, seed = self.confetti
+        t = now - t0
+        if t > (until - t0) + 2.5:
+            self.confetti = None
+            return
+        d = ImageDraw.Draw(img)
+        cols = [(255, 215, 90), (240, 240, 250), (255, 110, 150), (110, 200, 255), (170, 130, 255), (120, 230, 140)]
+        r = random.Random(seed)
+        for i in range(110):
+            x0, delay = r.random() * W, r.random() * (until - t0) * 0.6
+            vx, vy = (r.random() - 0.5) * 120, 120 + r.random() * 160
+            spin, size = 4 + r.random() * 8, 5 + r.random() * 5
+            tt = t - delay
+            if tt < 0:
+                continue
+            y = -20 + vy * tt + 40 * tt * tt
+            if y > BANNER_Y + 10:
+                continue
+            x = x0 + vx * tt + math.sin(tt * 3 + i) * 18
+            a = tt * spin
+            w = size * abs(math.cos(a)) + 1
+            ca, sa = math.cos(a * 0.7), math.sin(a * 0.7)
+            d.polygon([(x + px * ca - py * sa, y + px * sa + py * ca)
+                       for px, py in ((-w, -size / 2), (w, -size / 2), (w, size / 2), (-w, size / 2))],
+                      fill=cols[i % len(cols)])
 
     def react(self, mood, secs=2.5, then=None, soft=False):
         """Show a reaction face on Hubie (shocked, cheering, facepalm, thinking, laughing, sleepy, happy)."""
@@ -344,4 +383,6 @@ class Scene:
                 self._base, self._dirty = self._build_base(), False
             frame = self._base.copy()
             self.draw_hubie(frame, now)
+            if self.confetti:
+                self._draw_confetti(frame, now)
         return frame.tobytes()

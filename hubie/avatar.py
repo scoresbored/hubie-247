@@ -61,10 +61,18 @@ class Avatar:
         self.frames = {n: load(f"{n}.png") for n in MOODS}
         self.blinks = {}
         self.pose_of = {}                   # frame name -> pose key
+        from . import eyes
+        self.gaze_frames = {}               # (frame, "game"/"cam", step 1..3) -> image with moved pupils
         for k, p in self.poses.items():
             for n in p["frames"]:
                 self.frames[n] = load(f"{n}.png")
                 self.pose_of[n] = k
+                if k in eyes.LOOK:
+                    full = Image.open(ART / f"{n}.png").convert("RGBA")
+                    for g, (dx, dy) in eyes.LOOK[k].items():
+                        for st in (1, 2, 3):
+                            im = eyes.look(full, k, round(dx * st / 3), round(dy * st / 3))
+                            self.gaze_frames[(n, g, st)] = im.resize((size, size), Image.LANCZOS)
             if (ART / p["blink"]).exists():
                 self.blinks[k] = load(p["blink"])
         self.pose = "A"
@@ -84,7 +92,17 @@ class Avatar:
         self.last_voice = 0.0
         self.was_quiet_since = 1.0          # when the current pause started (0 while talking)
         self._last = None
+        self._last_key = None
         self.k = BODY
+        # where he's looking: -1 = at the game, 0 = straight, +1 = at viewers (eased each frame)
+        self.gaze, self.gaze_target, self.gaze_hold = 0.0, -1.0, 0.0
+        self.peek_until = 0.0               # quick glance at the game while talking
+        # lip sync: loudness auto-gain, when the mouth last changed, previous mouth image for blending
+        self.peak = 0.3
+        self.step_t = 0.0
+        self.mouth_prev = None
+        # rain cloud over his head on losing streaks
+        self.rain_t0, self.rain_until = 0.0, 0.0
 
     def _make_card(self, bg):
         s = self.size
@@ -108,6 +126,27 @@ class Avatar:
             return
         self.mood, self.mood_t0, self.mood_until = mood, now, now + secs
         self.queue = list(then or [])
+
+    def on_round(self, now):
+        """A round just landed: if he's mid-sentence, he flicks his eyes to the game for a moment."""
+        if now - self.last_voice < 0.35:
+            self.peek_until = now + 0.7
+
+    def rain(self, secs, now):
+        self.rain_t0, self.rain_until = now, now + secs
+
+    def _update_gaze(self, now, speaking, reacting):
+        if reacting:
+            target = 0.0                                   # reaction faces keep their own eyes
+        elif speaking:
+            target = -1.0 if now < self.peek_until else 1.0
+        else:                                              # watching the game, now and then checks on chat
+            if now > self.gaze_hold:
+                self.gaze_target = 1.0 if self.gaze_target < 0 and random.random() < 0.6 else -1.0
+                self.gaze_hold = now + (random.uniform(2, 4) if self.gaze_target > 0 else random.uniform(6, 16))
+            target = self.gaze_target
+        step = 1 / 30 / 0.16                               # ~0.16s to sweep across
+        self.gaze += max(-step, min(step, target - self.gaze))
 
     # ---------- per frame ----------
     def _pick(self, now, level):
@@ -146,21 +185,66 @@ class Avatar:
             if self.next_pose_swap:
                 self.pose = random.choice([k for k in self.poses if k != self.pose])
             self.next_pose_swap = now + random.uniform(60, 150)
-        # talking (or resting): the pose's frames, mouth following the voice with hysteresis
-        self.talk_level += (level - self.talk_level) * (0.6 if level > self.talk_level else 0.35)
+        # talking (or resting): the pose's frames, mouth following the voice
+        if level > 0.02:                                  # auto-gain: quiet lines still open the mouth fully
+            self.peak = max(level, self.peak * 0.997)
+        lv_in = min(1.0, level / max(0.22, self.peak) * 0.85)
+        self.talk_level += (lv_in - self.talk_level) * (0.65 if lv_in > self.talk_level else 0.4)
         lv, P = self.talk_level, self.poses[self.pose]
-        step = min(self.talk_step, len(P["frames"]) - 1)
-        while step < len(P["up"]) and lv > P["up"][step]:
-            step += 1
-        while step > 0 and lv < P["down"][step - 1]:
-            step -= 1
-        self.talk_step = step
-        return P["frames"][step], "idle"
+        cur = min(self.talk_step, len(P["frames"]) - 1)
+        want = cur
+        while want < len(P["up"]) and lv > P["up"][want]:
+            want += 1
+        while want > 0 and lv < P["down"][want - 1]:
+            want -= 1
+        if want != cur and now - self.step_t >= 0.055:    # hold each mouth shape ~2 frames (no flicker)
+            self.talk_step = want if want > cur else max(want, cur - 1)   # open fast, close a step at a time
+            self.step_t = now
+        else:
+            self.talk_step = cur
+        return P["frames"][self.talk_step], "idle"
+
+    def _draw_rain(self, img, now):
+        """A little grey cloud over his head with rain falling, fading in and out."""
+        s = self.size
+        fade = min(1.0, (now - self.rain_t0) / 0.4, max(0.0, (self.rain_until + 0.5 - now) / 0.5))
+        if fade <= 0:
+            return
+        layer = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+        d = ImageDraw.Draw(layer)
+        cx = s * 0.42 + math.sin(now * 0.8) * 6
+        cy = s * 0.14 + math.sin(now * 1.3) * 2
+        for i in range(24):                                 # rain drops below the cloud
+            r = random.Random(i)
+            x = cx - s * 0.2 + r.random() * s * 0.4
+            y = cy + 10 + ((now * (140 + 60 * r.random()) + r.random() * 200) % (s * 0.55))
+            d.line((x, y, x - 2, y + 9), fill=(150, 190, 235, int(210 * fade)), width=2)
+        grey = (120, 128, 142, int(245 * fade))
+        for dx, dy, rr in [(-38, 8, 22), (-12, -6, 28), (18, 0, 25), (42, 10, 19), (0, 14, 24)]:
+            d.ellipse((cx + dx - rr, cy + dy - rr, cx + dx + rr, cy + dy + rr), fill=grey)
+        d.ellipse((cx - 30, cy - 22, cx + 4, cy - 2), fill=(170, 176, 188, int(200 * fade)))
+        img.alpha_composite(layer)
 
     def render(self, now, level):
         """Returns the finished RGBA card (size x size) for this video frame."""
         key, motion = self._pick(now, level)
+        speaking = now - self.last_voice < 0.35
+        self._update_gaze(now, speaking, key not in self.pose_of)
         img = self.frames[key]
+        g = self.gaze
+        if key in self.pose_of and abs(g) > 0.05:
+            st = max(1, min(3, round(abs(g) * 3)))
+            img = self.gaze_frames.get((key, "game" if g < 0 else "cam", st), img)
+        if key in self.pose_of:                            # blend each mouth change over one frame
+            prev_key = self._last_key
+            if (self.mouth_prev is not None and prev_key != key and prev_key in self.pose_of
+                    and self.pose_of[prev_key] == self.pose_of[key]):
+                cur = img
+                img = Image.blend(self.mouth_prev, cur, 0.55)
+                self.mouth_prev = cur
+            else:
+                self.mouth_prev = img
+        self._last_key = key
         # blink on the neutral faces
         blink = self.blinks.get(self.pose_of.get(key))
         if blink is not None:
@@ -204,6 +288,9 @@ class Avatar:
             dy = -amp * k * 2
             sc = 1.0 + 0.08 * k
             ang = math.sin(age * 40) * 2.5 * k
+        # leaning toward what he's looking at (the game is to his left); stronger for the half-lidded pose
+        if key in self.pose_of:
+            ang += self.gaze * (2.8 if self.pose_of[key] == "A" else 1.2)
         # speaking adds a small nod with the words
         if key in self.pose_of:
             dy += self.talk_level * 4
@@ -230,5 +317,7 @@ class Avatar:
         moved = img.transform((s, s), Image.AFFINE, coeffs, resample=Image.BILINEAR)
         out = self.theme.background(now)
         out.alpha_composite(moved)
+        if now < self.rain_until + 0.5:
+            self._draw_rain(out, now)
         out.putalpha(self.mask)
         return out
