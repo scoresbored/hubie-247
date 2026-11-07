@@ -15,6 +15,7 @@ chats with viewers by name, moderates chat, and restarts himself when something 
 | Talks | Comments only on real moments (win streaks, long losing streaks, big hits, droughts ending, milestones), announces and recaps each segment, never leaves long dead air |
 | Chat | Reads Kick chat. Hubie speaks to first-time chatters and real questions; a separate 🤖 chat bot handles text replies, moderation notices and polls. Chat picks games with polls (vote 1-3) and `!play <game>` requests. Follows, subs and gifted subs get a bot post and a spoken thank-you. Replies scale with chat speed: a quiet chat gets answered (but not the same person every line); a busy chat gets newcomers, questions and "Hubie" mentions only, capped per minute, so it never looks spammy |
 | Music | Original lo-fi background loops generated in code (no third-party tracks), low volume, ducks under Hubie's voice |
+| Pop-out moves | Viewers type `!dance`, `!wave`, `!flex`, `!nap`, `!hmm`, `!cheer`, `!snack`, `!lol`, `!dapper` (or `!commands` for the list) and a full-body Hubie springs up over the game to do the move, with a caption naming who asked and its own sound effect (a bloop as he pops up, then e.g. a dance groove, party horn, sad trombone, snores, munching). One at a time, short gap between moves, one per viewer per minute. New poses become new commands by adding an image to `art/hubie/body/` |
 | Moderates | Offensive, vulgar or rude messages are **deleted from Kick chat and the user is muted**, before they ever reach the screen, Hubie's brain or his voice. Two layers: instant word rules (slurs, threats, sexual content, swearing, insults, with leetspeak and stretched spellings), then an AI check (Claude) for disguised or rude messages the rules miss. Mutes escalate for repeat offenders (3x, then 24h). Offensive usernames are never shown or spoken. Also removes links, promo/referral spam, caps and repeat spam; answers "I'm under 18" with the 18+ rule |
 | Stays safe | Every line passes a filter that blocks win promises, deposit/bonus/code talk and money amounts; every bet is checked to be $0 before the click and again in the site's reply |
 | Runs itself | Restarts crashed parts on its own: the stream (ffmpeg), the game browser, the chat reader, the whole app; benches a game for an hour if it keeps failing |
@@ -30,6 +31,7 @@ brain.py  Claude: Hubie's personality, moment commentary, chat replies
 safety.py filter every spoken/posted line; responsible-gambling lines
 voice.py  local text-to-speech + mouth-movement envelope
 scene.py  draws every frame (game, Hubie, results, chat, banner)
+sfx.py    original synthesized sound effects (pop-out moves, confetti, rain), mixed over voice + music
 avatar.py animated Hubie: mood faces, crossfades, breathing/sway, lip sync, blinks
 theme.py  seasonal look for the whole overlay: Hubie's sky follows the UTC clock (dawn/day/dusk/night), and each month has its own palette, panel pattern and animated particles (fall leaves, holiday snow and lights, new-year fireworks, hearts...); the red safety banner never changes
 stream.py pipes frames + voice into ffmpeg -> Kick (auto-restarts)

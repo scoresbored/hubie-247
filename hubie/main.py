@@ -148,6 +148,7 @@ class ChatState:
         self.pending = None                 # (game_key, strategy, note) chosen by chat
         self.suggestions = chatfun.Suggestions()
         self.rate = chatfun.ChatRate()
+        self.help_said = 0.0
         self.giveaway = None
         self.benched, self.current = {}, None
 
@@ -507,6 +508,20 @@ async def main(offline):
                 if state.poll and state.poll.vote(user, text):        # votes: counted, not answered
                     return
                 if state.giveaway and state.giveaway.enter(user, text):   # !enter: counted, not answered
+                    return
+                cmd = scene.popout.parse(text)                        # !dance, !wave ... pop-out moves
+                if cmd:
+                    if chatmod.bad_words(user):
+                        return
+                    if cmd == "help":
+                        now = time.time()
+                        if now - state.help_said > 90:
+                            state.help_said = now
+                            moves = " ".join("!" + c for c in scene.popout.available())
+                            await kick.bot(f"Make Hubie move: {moves} (one every few seconds, 1 per minute each)")
+                        return
+                    ok = scene.pop(cmd, user)
+                    log("popout", user=user, cmd=cmd, ok=ok[0], why=None if ok[0] else ok[1])
                     return
                 asyncio.create_task(handle_message(user, user_id, text, msg_id))   # don't block the chat reader
 

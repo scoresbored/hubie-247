@@ -87,6 +87,8 @@ class Scene:
         self._theme = theme
         self.pal = theme.palette(time.time())
         self.confetti = None
+        from .popout import Popout
+        self.popout = Popout((0, 0, 960, 540))       # full-body Hubie for chat commands, over the game
         self.avatar = None
         try:
             from . import avatar
@@ -152,9 +154,24 @@ class Scene:
             self.history = []
             self._dirty = True
 
-    def effect(self, kind, secs=3.5):
+    def pop(self, cmd, user):
+        """Chat command pop-out. Returns (True, mood, confetti) or (False, reason)."""
+        with self.lock:
+            res = self.popout.trigger(cmd, user, time.time())
+        if res[0]:
+            from . import popout, sfx
+            sfx.play("pop:" + res[3])                         # bloop up, the move's sound, whoop down
+            self.react(res[1], 3.0)
+            if res[2]:
+                self.effect("confetti", 3.0, sound=False)
+        return res
+
+    def effect(self, kind, secs=3.5, sound=True):
         """Screen effects: "confetti" (big hits, streaks, giveaway winners) or "rain" (cloud over Hubie)."""
         now = time.time()
+        if sound:
+            from . import sfx
+            sfx.play(kind)
         with self.lock:
             if kind == "confetti":
                 self.confetti = (now, now + secs, random.randrange(10 ** 6))
@@ -214,6 +231,10 @@ class Scene:
         d.text((20, y0 + 16), self.status or "Warming up", font=self.f_title, fill=ACC)
         d.text((20, y0 + 48), f"Rounds {r}    Hits {h}" + (f"    ({100 * h // r}%)" if r else ""),
                font=self.f_small, fill=DIMc)
+        if not self.poll and self.popout.available():         # tell viewers they can make him move
+            hint = "Chat: type !commands to make Hubie move"
+            d.text((CAPTION_BOX[2] - 16 - d.textlength(hint, font=self.f_small), y0 + 22), hint,
+                   font=self.f_small, fill=P["accent2"])
         d.text((20, y0 + 92), "Recent rolls", font=self.f_small, fill=DIMc)
         x = 150
         for outcome, win in reversed(self.history):
@@ -383,6 +404,7 @@ class Scene:
                 self._base, self._dirty = self._build_base(), False
             frame = self._base.copy()
             self.draw_hubie(frame, now)
+            self.popout.draw(frame, now)
             if self.confetti:
                 self._draw_confetti(frame, now)
         return frame.tobytes()

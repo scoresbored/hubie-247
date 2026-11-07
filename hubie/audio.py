@@ -42,6 +42,7 @@ class Mixer:
         self.tpos = 0
         self.music_vol = float(os.environ.get("HUBIE_MUSIC_VOLUME", "0.12"))
         self.duck = 1.0           # drops while Hubie talks so his voice stays clear
+        self.sfx = []             # playing sound effects: [samples (array 'h'), position]
 
     def set_music(self, paths):
         loaded = [_load_mono16(p) for p in paths]
@@ -58,6 +59,25 @@ class Mixer:
         c = self.track[self.tpos:self.tpos + PER_FRAME]
         self.tpos += PER_FRAME
         return c
+
+    def add_sfx(self, samples):
+        """Play a sound effect on top of everything (doesn't delay speech, doesn't move the mouth)."""
+        with self.lock:
+            if len(self.sfx) < 6:
+                self.sfx.append([array.array("h", samples.tobytes()), 0])
+
+    def _sfx_chunk(self):
+        if not self.sfx:
+            return None
+        mix = [0] * PER_FRAME
+        for item in self.sfx:
+            clip, pos = item
+            part = clip[pos:pos + PER_FRAME]
+            for i, v in enumerate(part):
+                mix[i] += v
+            item[1] = pos + PER_FRAME
+        self.sfx = [it for it in self.sfx if it[1] < len(it[0])]
+        return mix
 
     def enqueue(self, wav_path):
         """Queue a clip; returns a future that finishes when the clip has fully gone out."""
@@ -97,11 +117,15 @@ class Mixer:
         self.level = min(1.0, rms * 6)          # mouth follows the voice only
         with self.lock:
             m = self._music_chunk()
+            fx = self._sfx_chunk()
         if m is not None:
             target = 0.35 if self.level > 0.02 else 1.0
             self.duck += (target - self.duck) * (0.35 if target < self.duck else 0.04)   # fast duck, slow return
             g = self.music_vol * self.duck
             chunk = array.array("h", (max(-32768, min(32767, v + int(mv * g))) for v, mv in zip(chunk, m)))
+        if fx is not None:
+            g = 0.6 if self.level > 0.02 else 1.0          # tuck effects under his voice
+            chunk = array.array("h", (max(-32768, min(32767, v + int(f * g))) for v, f in zip(chunk, fx)))
         return chunk.tobytes(), self.level
 
 
