@@ -21,7 +21,7 @@ load_env()
 
 GAME_URL = os.environ.get("HUBIE_GAME_URL", "https://www.housebets.com/games/housegames-dice")
 PROFILE = Path(os.environ.get("HUBIE_PROFILE", str(ROOT / "profile")))
-VOICE_MODEL = os.environ.get("HUBIE_VOICE_MODEL", str(ROOT / "voices" / "en_US-ryan-high.onnx"))
+VOICE_MODEL = os.environ.get("HUBIE_VOICE_MODEL", str(ROOT / "voices" / "en_GB-northern_english_male-medium.onnx"))
 AUDIO_SINK = os.environ.get("HUBIE_SINK", "hubie_out")
 MODEL = os.environ.get("HUBIE_MODEL", "claude-haiku-5-5")
 W, H, FPS = 1280, 720, 30

@@ -69,7 +69,7 @@ stream key and a Kick developer app, an Anthropic API key, and a Housebets accou
 ## Stack
 
 - **Model:** Claude Haiku 5.5 (Anthropic API) for personality, commentary and chat replies
-- **Voice:** Piper TTS (local, offline), voice `en_US-ryan-high`
+- **Voice:** Piper TTS (local, offline), voice `en_GB-northern_english_male-medium`, slowed to a relaxed sloth pace (`HUBIE_VOICE_SPEED`, optional `HUBIE_VOICE_PITCH`)
 - **Animation:** Pillow frame renderer; Hubie expression set generated with Google Gemini (Nano Banana) from the official Hubie picture, cut out of green screen; lip sync, blinks, breathing, sway and reactions animated in code
 - **Game control:** Playwright + Chromium on Xvfb; results from the site's own bet API reply
 - **Streaming:** ffmpeg (libx264 + AAC) over RTMPS to Kick; voice mixed in-process, one audio chunk per video frame (no A/V drift)
