@@ -161,7 +161,7 @@ class Avatar:
             else:
                 self.mood = "idle"
         # little life when nothing is going on
-        if self.mood == "idle" and not speaking:
+        if self.mood == "idle" and not speaking and getattr(self, "idle_moods", True):
             if not self.next_glance:
                 self.next_glance = now + random.uniform(25, 70)
                 self.next_yawn = now + random.uniform(600, 1200)

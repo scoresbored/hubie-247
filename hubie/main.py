@@ -225,7 +225,7 @@ class Moments:
 def react_to(scene, reason):
     """Pick Hubie's face for a notable round (the Moments reason text)."""
     if reason.startswith("a big hit"):
-        scene.react("shocked", 1.3, then=[("cheering", 3.5)])
+        scene.react("shocked", 1.3, then=[("cheering", 3.5)], big=True)
         scene.effect("confetti", 3.5)
     elif reason.startswith("finally a hit"):
         scene.react("cheering", 3.0)
@@ -307,7 +307,7 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None
             except NonZeroBet as e:
                 log("STOP_NONZERO_BET", err=str(e))
                 scene.set_status("Taking a short break. Back soon.")
-                scene.react("sleepy", 3600)
+                scene.react("sleepy", 3600, big=True)
                 await asyncio.sleep(3600)                    # never bet again this hour
                 continue
             except Exception as e:
@@ -375,7 +375,7 @@ async def run_giveaway(scene, voice, brain, kick, state, prize, minutes):
         if kick:
             await kick.bot("Giveaway closed with no entries. Next time!")
         return
-    scene.react("shocked", 1.2, then=[("cheering", 3.5)])
+    scene.react("shocked", 1.2, then=[("cheering", 3.5)], big=True)
     scene.effect("confetti", 4.0)
     if kick:
         await kick.bot(f"🎉 @{winner} wins the giveaway: {prize}! ({len(g.entrants)} entered)")

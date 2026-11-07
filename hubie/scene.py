@@ -6,6 +6,7 @@ missing it falls back to the single head image, then to a simple drawn placehold
 import glob
 import io
 import math
+import os
 import random
 import threading
 import time
@@ -29,6 +30,7 @@ RED = (240, 90, 100)
 
 GAME_BOX = (0, 0, 960, 540)        # game video area
 SIDE_X = 960                        # right column
+REACTIONS = os.environ.get("HUBIE_REACTIONS", "minimal")   # "minimal" = big moments only, "full" = all
 CAPTION_BOX = (0, 540, 960, 690)
 BANNER_Y = 690
 
@@ -94,6 +96,7 @@ class Scene:
             from . import avatar
             if avatar.available():
                 self.avatar = avatar.Avatar(300)
+                self.avatar.idle_moods = REACTIONS != "minimal"     # random glances/yawns only in "full"
         except Exception:
             self.avatar = None
         self.art = None if self.avatar else self._load_art()
@@ -205,8 +208,12 @@ class Scene:
                        for px, py in ((-w, -size / 2), (w, -size / 2), (w, size / 2), (-w, size / 2))],
                       fill=cols[i % len(cols)])
 
-    def react(self, mood, secs=2.5, then=None, soft=False):
-        """Show a reaction face on Hubie (shocked, cheering, facepalm, thinking, laughing, sleepy, happy)."""
+    def react(self, mood, secs=2.5, then=None, soft=False, big=False):
+        """Show a reaction face on Hubie (shocked, cheering, facepalm, thinking, laughing, sleepy, happy).
+        With HUBIE_REACTIONS=minimal (the default) only big moments change his face; otherwise he just
+        chats in his box and the full-body pop-out moves carry the expressions."""
+        if REACTIONS == "minimal" and not big:
+            return
         if self.avatar:
             with self.lock:
                 self.avatar.react(mood, secs, then=then, soft=soft, now=time.time())
