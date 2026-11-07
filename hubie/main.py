@@ -72,6 +72,10 @@ async def chat_worker(scene, voice, brain, kick, chat_q):
             line = f"{user}, this stream is eighteen plus only, so I can't chat about this one with you. Take care."
             speak_it = True
         else:
+            if first_time:
+                scene.react("happy", 2.5, soft=True)
+            elif "?" in text or "hubie" in text.lower():
+                scene.react("thinking", 2.5, soft=True)
             raw = await brain.reply(user, text, first_time=first_time)
             line = safety.clean(raw)
             if not line:
@@ -110,6 +114,7 @@ async def alert(scene, voice, brain, kick, kind, info):
     named, anon = BOT_ALERTS[kind]
     msg = (named if user else anon).format(u=user, n=n)
     scene.add_chat("HubieBot", msg)
+    scene.react("happy" if kind == "follow" else "cheering", 4.0)
     if kick:
         await kick.bot(msg)
     extra = f"{info.get('months')} months" if kind == "sub" and info.get("months") else (f"{n} subs" if kind == "gift" else "")
@@ -136,6 +141,7 @@ async def run_poll(scene, voice, brain, kick, state, benched, current):
     n = len(poll.options)
     listing = "   ".join(f"{i + 1}) {poll.label(i)}" for i in range(n))
     log("poll_start", options=[poll.label(i) for i in range(n)])
+    scene.react("thinking", 3.0)
     if kick:
         await kick.bot(f"POLL: what should Hubie play next? Type 1-{n} in chat.   {listing}")
     await say(scene, voice, brain, max_age=40, line=f"Chat, you're picking my next game. Type a number from one to {['', 'one', 'two', 'three', 'four'][n]}, the options are on screen.")
@@ -153,6 +159,7 @@ async def run_poll(scene, voice, brain, kick, state, benched, current):
             await kick.bot("Poll closed with no votes, so Hubie picks. Next poll soon!")
         return
     state.pending = (key, strat, "picked by chat")
+    scene.react("happy", 3.0)
     label = f"{GAMES[key]['name']} ({strat['name']})"
     if kick:
         await kick.bot(f"Poll closed: {label} wins with {max(tally)} vote{'s' if max(tally) != 1 else ''}. Up next!")
@@ -190,6 +197,20 @@ class Moments:
     def summary(self):
         pct = f", {100 * self.hits // self.rounds}% hit rate" if self.rounds else ""
         return f"{self.rounds} rounds, {self.hits} hits{pct}"
+
+
+def react_to(scene, reason):
+    """Pick Hubie's face for a notable round (the Moments reason text)."""
+    if reason.startswith("a big hit"):
+        scene.react("shocked", 1.3, then=[("cheering", 3.5)])
+    elif reason.startswith("finally a hit"):
+        scene.react("cheering", 3.0)
+    elif "hits in a row" in reason:
+        scene.react("cheering" if int(reason.split()[0]) >= 7 else "laughing", 3.0)
+    elif "misses in a row" in reason:
+        scene.react("facepalm", 3.5)
+    elif reason.startswith("round "):
+        scene.react("happy", 2.5)
 
 
 def pick_segment(benched, recent):
@@ -236,6 +257,7 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None
             await game.recover(hard=True)
             continue
         scene.set_status(f"Now playing: {game.name} - {strat['name']}")
+        scene.react("happy", 2.5)
         m = Moments()
         scene.reset_session()
         label = strat["name"] + (f" ({note})" if note else "")
@@ -256,6 +278,7 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None
             except NonZeroBet as e:
                 log("STOP_NONZERO_BET", err=str(e))
                 scene.set_status("Taking a short break. Back soon.")
+                scene.react("sleepy", 3600)
                 await asyncio.sleep(3600)                    # never bet again this hour
                 continue
             except Exception as e:
@@ -269,6 +292,8 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None
                 continue
             scene.on_event(ev)
             reason = m.update(ev)
+            if reason:
+                react_to(scene, reason)
             log("round", **{k: v for k, v in ev.items() if k != "details"})
             quiet = time.time() - last_spoke < 20 and (ev.get("multiplier") or 0) < 50
             if reason and not quiet:                         # max one comment per ~20s unless it's huge

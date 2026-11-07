@@ -9,7 +9,7 @@ flowchart LR
         BRAIN["Brain<br/>brain.py<br/>Claude Haiku 5.5"]
         SAFE["Safety filter<br/>safety.py"]
         VOICE["Voice<br/>voice.py<br/>Piper TTS"]
-        SCENE["Scene renderer<br/>scene.py<br/>Pillow, Hubie art"]
+        SCENE["Scene renderer<br/>scene.py + avatar.py<br/>Pillow, animated Hubie"]
         STREAM["Streamer<br/>stream.py<br/>ffmpeg"]
         CHAT["Chat agent<br/>kick.py + chatmod.py"]
         SUP["Supervisor<br/>run.sh restart loop<br/>+ per-part auto-restart"]

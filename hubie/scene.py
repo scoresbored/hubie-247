@@ -1,7 +1,7 @@
-"""Draws every stream frame: game, Hubie, captions, chat and the safety banner.
+"""Draws every stream frame: game, Hubie, chat, stats and the safety banner.
 
-Hubie here is a PLACEHOLDER (simple shapes). When the official art arrives, only
-draw_hubie() changes: it will paste the art layers instead.
+Hubie himself is animated by avatar.py (expression frames + motion). If those frames are
+missing it falls back to the single head image, then to a simple drawn placeholder.
 """
 import glob
 import io
@@ -82,7 +82,14 @@ class Scene:
         self.poll = None           # (title, [(label, votes)], seconds_left) while a poll runs
         self._base = None
         self._dirty = True
-        self.art = self._load_art()
+        self.avatar = None
+        try:
+            from . import avatar
+            if avatar.available():
+                self.avatar = avatar.Avatar(300)
+        except Exception:
+            self.avatar = None
+        self.art = None if self.avatar else self._load_art()
 
     def _load_art(self):
         """Official Hubie head art + where his mouth and eyes are. None = use placeholder."""
@@ -137,6 +144,12 @@ class Scene:
             self.stats = {"rounds": 0, "hits": 0}
             self.history = []
             self._dirty = True
+
+    def react(self, mood, secs=2.5, then=None, soft=False):
+        """Show a reaction face on Hubie (shocked, cheering, facepalm, thinking, laughing, sleepy, happy)."""
+        if self.avatar:
+            with self.lock:
+                self.avatar.react(mood, secs, then=then, soft=soft, now=time.time())
 
     def speak(self, env):
         with self.lock:
@@ -211,9 +224,20 @@ class Scene:
         return self.speech_env[i]
 
     def draw_hubie(self, img, now):
+        if self.avatar:
+            return self._draw_hubie_avatar(img, now)
         if self.art:
             return self._draw_hubie_art(img, now)
         return self._draw_hubie_placeholder(img, now)
+
+    def _draw_hubie_avatar(self, img, now):
+        card = self.avatar.render(now, self._mouth_level(now))
+        mood = self.mood if now < self.mood_until else "idle"
+        glow = {"hit": GREEN, "miss": RED}.get(mood, TEAL)
+        x0, y0 = SIDE_X + (W - SIDE_X - card.width) // 2, 14
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle((x0 - 5, y0 - 5, x0 + card.width + 4, y0 + card.height + 4), 32, outline=glow, width=5)
+        img.paste(card, (x0, y0), card)
 
     def _draw_hubie_art(self, img, now):
         """Official Hubie art, with a moving mouth and blinking eyes drawn on top."""

@@ -10,7 +10,7 @@ chats with viewers by name, moderates chat, and restarts himself when something 
 
 | Area | How |
 | --- | --- |
-| On screen | Animated Hubie (mouth moves with his voice, blinks, reacts green/red to hits and misses), the live game, recent results, chat, and a permanent 18+ / demo / gamble-responsibly banner |
+| On screen | Animated Hubie (10 expression frames: lip sync from his live voice volume, blinks, breathing and sway, reaction faces for big hits, streaks, follows, polls and chat questions), the live game, recent results, chat, and a permanent 18+ / demo / gamble-responsibly banner |
 | Plays | Rotates every 8-15 min between House originals and strategies: Dice (1.5x / 2x / 10x / 50x), Limbo (2x-100x targets), Wheel (low/medium/high risk), Max Win, Plinko, Coinflip |
 | Talks | Comments only on real moments (win streaks, long losing streaks, big hits, droughts ending, milestones), announces and recaps each segment, never leaves long dead air |
 | Chat | Reads Kick chat. Hubie speaks to first-time chatters and real questions; a separate 🤖 chat bot handles text replies, moderation notices and polls. Chat picks games with polls (vote 1-3) and `!play <game>` requests. Follows, subs and gifted subs get a bot post and a spoken thank-you; first-time chatters always get a spoken hello |
@@ -29,7 +29,8 @@ games.py  the games + strategies Hubie rotates through
 brain.py  Claude: Hubie's personality, moment commentary, chat replies
 safety.py filter every spoken/posted line; responsible-gambling lines
 voice.py  local text-to-speech + mouth-movement envelope
-scene.py  draws every frame (game, Hubie art, results, chat, banner)
+scene.py  draws every frame (game, Hubie, results, chat, banner)
+avatar.py animated Hubie: mood faces, crossfades, breathing/sway, lip sync, blinks
 stream.py pipes frames + voice into ffmpeg -> Kick (auto-restarts)
 audio.py  mixer: exactly one frame of audio per video frame, music bed with ducking, drives the mouth
 music.py  generates original lo-fi background loops (numpy)
@@ -68,7 +69,7 @@ stream key and a Kick developer app, an Anthropic API key, and a Housebets accou
 
 - **Model:** Claude Haiku 5.5 (Anthropic API) for personality, commentary and chat replies
 - **Voice:** Piper TTS (local, offline), voice `en_US-ryan-high`
-- **Animation:** Pillow frame renderer; Hubie art generated with Grok, mouth and blink animated in code
+- **Animation:** Pillow frame renderer; Hubie expression set generated with Google Gemini (Nano Banana) from the official Hubie picture, cut out of green screen; lip sync, blinks, breathing, sway and reactions animated in code
 - **Game control:** Playwright + Chromium on Xvfb; results from the site's own bet API reply
 - **Streaming:** ffmpeg (libx264 + AAC) over RTMPS to Kick; voice mixed in-process, one audio chunk per video frame (no A/V drift)
 - **Chat:** Kick pop-out chat feed (read) + official Kick public API (send, timeouts), httpx
@@ -86,7 +87,7 @@ stream key and a Kick developer app, an Anthropic API key, and a Housebets accou
 
 ```
 hubie/      the app
-art/        Hubie head art + mouth/eye positions
+art/hubie/  Hubie expression frames (idle, 2 talking mouths, 7 moods, blink overlay)
 deploy/     bootstrap.sh (server prep), hubie.service (optional systemd)
 tools/      spike.py (game recon / endurance test / one-time login), find_pack.py
 docs/       architecture diagram
