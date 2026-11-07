@@ -18,6 +18,7 @@ ART = Path(__file__).resolve().parent.parent / "art" / "hubie"
 MOODS = ["shocked", "cheering", "facepalm", "thinking", "laughing", "sleepy", "happy"]
 TALK = ["idle", "talk_half", "talk_open"]
 FADE = 0.14            # seconds of crossfade between faces
+BODY = 0.86           # Hubie's size inside his card (1.0 = fills it)
 MIN_HOLD = 1.2         # a fresh reaction stays at least this long even if Hubie starts talking
 
 # per-mood motion: (bob amplitude px, bob speed, sway degrees, sway speed, style)
@@ -44,7 +45,8 @@ class Avatar:
                        for n in TALK + MOODS}
         blink = ART / "blink.png"
         self.blink = Image.open(blink).convert("RGBA").resize((size, size), Image.LANCZOS) if blink.exists() else None
-        self.card = self._make_card(bg)
+        from .theme import Theme
+        self.theme = Theme(size)            # seasonal / day-night background behind him
         self.mask = Image.new("L", (size, size), 0)
         ImageDraw.Draw(self.mask).rounded_rectangle((0, 0, size - 1, size - 1), 28, fill=255)
         self.mood, self.mood_t0, self.mood_until = "idle", 0.0, 0.0
@@ -57,6 +59,7 @@ class Avatar:
         self.next_yawn = 0.0
         self.last_voice = 0.0
         self._last = None
+        self.k = BODY
 
     def _make_card(self, bg):
         s = self.size
@@ -174,15 +177,23 @@ class Avatar:
             sc *= 1.0 + 0.05 * (1 - age / 0.25)
 
         s = self.size
-        px, py = s / 2, s * 0.98            # pivot near the bottom: he sways from the body
+        # body size: a bit smaller than the card so the seasonal sky shows, full size when cheering
+        target_k = 1.0 if motion == "cheering" else BODY
+        self.k += (target_k - self.k) * 0.18
+        k = self.k
+        ax, ay = s * 0.995, s * 0.995       # shrink toward the bottom-right (where the art meets the edge)
+        cx, cy = s * 0.55, s * 0.98         # sway/breathe pivot: bottom of his body
         a = math.radians(ang)
-        ca, sa = math.cos(a) / sc, math.sin(a) / sc
-        # inverse affine (output -> input) for rotate+scale about pivot, then shift by dy
-        ox, oy = px, py + dy
-        coeffs = (ca, sa, px - ca * ox - sa * oy,
-                  -sa, ca, py + sa * ox - ca * oy)
+        cos, sin = math.cos(a) * sc, math.sin(a) * sc
+        # forward map: p1 = A + k(p - A);  p2 = C + sc*R(a)(p1 - C) + (0, dy)
+        m00, m01, m10, m11 = cos * k, -sin * k, sin * k, cos * k
+        tx = cx + cos * (ax - k * ax - cx) - sin * (ay - k * ay - cy)
+        ty = cy + dy + sin * (ax - k * ax - cx) + cos * (ay - k * ay - cy)
+        det = m00 * m11 - m01 * m10         # PIL wants the inverse (output -> input)
+        i00, i01, i10, i11 = m11 / det, -m01 / det, -m10 / det, m00 / det
+        coeffs = (i00, i01, -(i00 * tx + i01 * ty), i10, i11, -(i10 * tx + i11 * ty))
         moved = img.transform((s, s), Image.AFFINE, coeffs, resample=Image.BILINEAR)
-        out = self.card.copy()
+        out = self.theme.background(now)
         out.alpha_composite(moved)
         out.putalpha(self.mask)
         return out

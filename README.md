@@ -10,7 +10,7 @@ chats with viewers by name, moderates chat, and restarts himself when something 
 
 | Area | How |
 | --- | --- |
-| On screen | Animated Hubie (10 expression frames: lip sync from his live voice volume, blinks, breathing and sway, reaction faces for big hits, streaks, follows, polls and chat questions), the live game, recent results, chat, and a permanent 18+ / demo / gamble-responsibly banner |
+| On screen | Animated Hubie (10 expression frames: lip sync from his live voice volume, blinks, breathing and sway, reaction faces for big hits, streaks, follows, polls and chat questions; seasonal sky that follows UTC day and night), the live game, recent results, chat, and a permanent 18+ / demo / gamble-responsibly banner |
 | Plays | Rotates every 8-15 min between House originals and strategies: Dice (1.5x / 2x / 10x / 50x), Limbo (2x-100x targets), Wheel (low/medium/high risk), Max Win, Plinko, Coinflip |
 | Talks | Comments only on real moments (win streaks, long losing streaks, big hits, droughts ending, milestones), announces and recaps each segment, never leaves long dead air |
 | Chat | Reads Kick chat. Hubie speaks to first-time chatters and real questions; a separate 🤖 chat bot handles text replies, moderation notices and polls. Chat picks games with polls (vote 1-3) and `!play <game>` requests. Follows, subs and gifted subs get a bot post and a spoken thank-you; first-time chatters always get a spoken hello |
@@ -31,6 +31,7 @@ safety.py filter every spoken/posted line; responsible-gambling lines
 voice.py  local text-to-speech + mouth-movement envelope
 scene.py  draws every frame (game, Hubie, results, chat, banner)
 avatar.py animated Hubie: mood faces, crossfades, breathing/sway, lip sync, blinks
+theme.py  his background: sky follows the UTC clock (dawn/day/dusk/night) + a theme per month (fall leaves, holiday snow and lights, new-year fireworks, hearts...)
 stream.py pipes frames + voice into ffmpeg -> Kick (auto-restarts)
 audio.py  mixer: exactly one frame of audio per video frame, music bed with ducking, drives the mouth
 music.py  generates original lo-fi background loops (numpy)
