@@ -461,13 +461,22 @@ async def main(offline):
             async def punish(user, user_id, msg_id, minutes, reason):
                 """Delete the message, mute the user (longer for repeat offenders), short bot notice."""
                 minutes = chatmod.escalate(user, minutes)
+                if reason in ("message flooding", "no spam or self-promotion"):   # wipe their recent burst too
+                    for _, m in recent_ids.get(user.lower(), []):
+                        if m != msg_id:
+                            await kick.delete(m)
                 await kick.delete(msg_id)
                 await kick.timeout(user_id, minutes, reason)
                 log("chat_removed", user=user, minutes=minutes, reason=reason)
                 shown = user if not chatmod.bad_words(user) else "a chatter"
                 await kick.bot(f"Message removed. {shown} muted for {minutes} min: {reason}.")
 
+            recent_ids = {}                                            # user -> recent message ids (to clean up floods)
+
             async def handle_message(user, user_id, text, msg_id):
+                log("chat_in", user=user, text=text[:120])
+                ids = recent_ids.setdefault(user.lower(), [])
+                ids[:] = [(t, m) for t, m in ids if time.time() - t < 30] + [(time.time(), msg_id)]
                 if chatmod.bad_words(user):                            # offensive username: never shown or spoken
                     await punish(user, user_id, msg_id, 60, "offensive username")
                     return

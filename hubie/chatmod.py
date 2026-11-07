@@ -12,6 +12,16 @@ import time
 from collections import defaultdict, deque
 
 LINK = re.compile(r"(https?://|www\.|\b[\w-]+\.(com|net|org|io|gg|xyz|bet|casino|co|me|ly|tv)\b|discord\.gg)", re.I)
+# links written to dodge filters: "site dot com", "site . com", "site(.)gg", "t.me/x", "wa.me"
+SNEAKY_LINK = re.compile(r"(\b[a-z0-9-]{3,}\s*(\.|\(\.\)|\[\.\]|\bdot\b|\(dot\)|\[dot\])\s*"
+                         r"(com|net|org|io|gg|xyz|tv|me|ru|co|live|app|site|online|shop|bet|win)\b|t\.me/|wa\.me|"
+                         r"discord\s*(\.|dot)\s*gg)", re.I)
+# the usual Kick spam-bot pitches
+VIEWBOT = re.compile(r"(viewers?|followers?|subs|views)\b.{0,40}\b(cheap|buy|real|boost|grow|get more|increase|"
+                     r"promot|price|\$)|\b(cheap|buy|real|boost|grow|get more|increase)\b.{0,30}\b(viewers?|"
+                     r"followers?|views|subs)\b|promote your (stream|channel)|grow your (stream|channel)|"
+                     r"streamboo|viewerboo|\b(dm|message) me (on|at)\s*(tg|telegram|insta|ig|discord|snap|whatsapp)|"
+                     r"add me on (tg|telegram|snap|whatsapp)|work from home|investment|forex|onlyfans", re.I)
 PROMO = re.compile(r"(promo ?code|ref(erral)? ?code|use (my )?code|bonus code|free (money|spins|crypto)|"
                    r"giveaway.*(dm|link)|dm me|deposit (now|here)|sign ?up (with|using)|airdrop)", re.I)
 
@@ -77,7 +87,9 @@ def check(user, text):
     hit = bad_words(t)
     if hit:
         return hit
-    if LINK.search(t):
+    if VIEWBOT.search(t):
+        return (60, "no spam or self-promotion")
+    if LINK.search(t) or SNEAKY_LINK.search(t):
         return (5, "no links in chat")
     if PROMO.search(t):
         return (10, "no promo or referral spam")
@@ -87,6 +99,8 @@ def check(user, text):
     q = _recent[user.lower()]
     now = time.time()
     q.append((now, t.lower()))
+    if len(q) >= 3 and now - q[-3][0] < 6:
+        return (10, "message flooding")
     if len(q) >= 3 and len({m for _, m in list(q)[-3:]}) == 1 and now - q[-3][0] < 60:
         return (2, "repeat spam")
     return None
