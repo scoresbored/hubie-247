@@ -1,9 +1,11 @@
 """Animated Hubie: expression frames + procedural motion, drawn fresh every video frame.
 
 Frames live in art/hubie/*.png (cut out of green-screen renders of the official-style art):
-  idle, talk_half, talk_open   same pose, only the mouth differs (used for lip sync)
+  idle, talk_half, talk_open   pose A (smug, paw on cheek): mouth closed / half / open, for lip sync
+  idle2, talk2_1..3            pose B (wide-eyed, paws on bowtie): four mouth steps, closed to wide
+                               each new line of speech picks a pose, so he doesn't look the same every time
   shocked, cheering, facepalm, thinking, laughing, sleepy, happy   reaction faces
-  blink.png                    eyelids that sit on top of the idle/talk frames
+  blink.png, blink2.png         eyelids for pose A and pose B
 
 The director calls react("cheering", 3) etc. Everything else (breathing, sway, blinking,
 the mouth following the voice, little idle glances and yawns) happens here by itself.
@@ -16,7 +18,15 @@ from PIL import Image, ImageDraw, ImageFilter
 
 ART = Path(__file__).resolve().parent.parent / "art" / "hubie"
 MOODS = ["shocked", "cheering", "facepalm", "thinking", "laughing", "sleepy", "happy"]
-TALK = ["idle", "talk_half", "talk_open"]
+# talking poses: frames from mouth closed to widest, the blink overlay, and when to step the mouth
+# up (louder than) / down (quieter than) for each step
+POSES = {
+    "A": dict(frames=["idle", "talk_half", "talk_open"], blink="blink.png",
+              up=[0.12, 0.45], down=[0.06, 0.30]),
+    "B": dict(frames=["idle2", "talk2_1", "talk2_2", "talk2_3"], blink="blink2.png",
+              up=[0.10, 0.28, 0.50], down=[0.05, 0.20, 0.38]),
+}
+TALK = POSES["A"]["frames"]
 FADE = 0.14            # seconds of crossfade between faces
 BODY = 0.86           # Hubie's size inside his card (1.0 = fills it)
 MIN_HOLD = 1.2         # a fresh reaction stays at least this long even if Hubie starts talking
@@ -38,13 +48,28 @@ def available():
     return all((ART / f"{n}.png").exists() for n in TALK + MOODS)
 
 
+def _poses():
+    """Poses whose frames are all present (pose A is required, the others are optional)."""
+    return {k: v for k, v in POSES.items() if all((ART / f"{n}.png").exists() for n in v["frames"])}
+
+
 class Avatar:
     def __init__(self, size=300, bg=(20, 45, 60)):
         self.size = size
-        self.frames = {n: Image.open(ART / f"{n}.png").convert("RGBA").resize((size, size), Image.LANCZOS)
-                       for n in TALK + MOODS}
-        blink = ART / "blink.png"
-        self.blink = Image.open(blink).convert("RGBA").resize((size, size), Image.LANCZOS) if blink.exists() else None
+        load = lambda n: Image.open(ART / n).convert("RGBA").resize((size, size), Image.LANCZOS)
+        self.poses = _poses()
+        self.frames = {n: load(f"{n}.png") for n in MOODS}
+        self.blinks = {}
+        self.pose_of = {}                   # frame name -> pose key
+        for k, p in self.poses.items():
+            for n in p["frames"]:
+                self.frames[n] = load(f"{n}.png")
+                self.pose_of[n] = k
+            if (ART / p["blink"]).exists():
+                self.blinks[k] = load(p["blink"])
+        self.pose = "A"
+        self.talk_step = 0
+        self.next_pose_swap = 0.0
         from .theme import Theme
         self.theme = Theme(size)            # seasonal / day-night background behind him
         self.mask = Image.new("L", (size, size), 0)
@@ -53,11 +78,11 @@ class Avatar:
         self.queue = []                     # chained reactions: [(mood, secs)]
         self.shown, self.prev, self.fade_t0 = "idle", None, 0.0
         self.talk_level = 0.0
-        self.talk_frame = "idle"
         self.next_blink, self.blink_until, self.double = 0.0, 0.0, False
         self.next_glance = 0.0
         self.next_yawn = 0.0
         self.last_voice = 0.0
+        self.was_quiet_since = 1.0          # when the current pause started (0 while talking)
         self._last = None
         self.k = BODY
 
@@ -110,33 +135,43 @@ class Avatar:
 
         if self.mood != "idle" and not (speaking and now - self.mood_t0 > MIN_HOLD):
             return self.mood, self.mood
-        # talking (or resting): idle body with the mouth following the voice
+        # a new line of speech after a pause: maybe switch pose, so he doesn't look identical every time
+        if speaking and self.was_quiet_since and now - self.was_quiet_since > 1.5:
+            if len(self.poses) > 1 and random.random() < 0.5:
+                self.pose = random.choice([k for k in self.poses if k != self.pose])
+            self.was_quiet_since = 0.0
+        if not speaking and not self.was_quiet_since:
+            self.was_quiet_since = now
+        if not speaking and now > self.next_pose_swap and len(self.poses) > 1:   # rare idle shuffle
+            if self.next_pose_swap:
+                self.pose = random.choice([k for k in self.poses if k != self.pose])
+            self.next_pose_swap = now + random.uniform(60, 150)
+        # talking (or resting): the pose's frames, mouth following the voice with hysteresis
         self.talk_level += (level - self.talk_level) * (0.6 if level > self.talk_level else 0.35)
-        lv = self.talk_level
-        cur = self.talk_frame                 # hysteresis so the mouth doesn't flicker
-        if cur == "talk_open":
-            nxt = "talk_open" if lv > 0.30 else ("talk_half" if lv > 0.08 else "idle")
-        elif cur == "talk_half":
-            nxt = "talk_open" if lv > 0.40 else ("talk_half" if lv > 0.06 else "idle")
-        else:
-            nxt = "talk_open" if lv > 0.45 else ("talk_half" if lv > 0.12 else "idle")
-        self.talk_frame = nxt
-        return nxt, "idle"
+        lv, P = self.talk_level, self.poses[self.pose]
+        step = min(self.talk_step, len(P["frames"]) - 1)
+        while step < len(P["up"]) and lv > P["up"][step]:
+            step += 1
+        while step > 0 and lv < P["down"][step - 1]:
+            step -= 1
+        self.talk_step = step
+        return P["frames"][step], "idle"
 
     def render(self, now, level):
         """Returns the finished RGBA card (size x size) for this video frame."""
         key, motion = self._pick(now, level)
         img = self.frames[key]
         # blink on the neutral faces
-        if self.blink is not None and key in TALK:
+        blink = self.blinks.get(self.pose_of.get(key))
+        if blink is not None:
             if now > self.next_blink:
                 self.blink_until = now + 0.13
                 self.double = random.random() < 0.15
                 self.next_blink = now + (0.32 if self.double else random.uniform(2.5, 6.0))
             if now < self.blink_until:
-                img = Image.alpha_composite(img, self.blink)
+                img = Image.alpha_composite(img, blink)
         # crossfade when the face changes (mouth flaps cut instantly, faces blend)
-        group = "talk" if key in TALK else key
+        group = ("talk" + self.pose_of[key]) if key in self.pose_of else key
         if group != self.shown:
             self.prev, self.fade_t0, self.shown = self._last, now, group
         if self.prev is not None and now - self.fade_t0 < FADE:
@@ -170,7 +205,7 @@ class Avatar:
             sc = 1.0 + 0.08 * k
             ang = math.sin(age * 40) * 2.5 * k
         # speaking adds a small nod with the words
-        if key in TALK:
+        if key in self.pose_of:
             dy += self.talk_level * 4
         # pop when a new reaction lands
         if motion != "idle" and age < 0.25:

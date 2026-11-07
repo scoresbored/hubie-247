@@ -10,7 +10,7 @@ chats with viewers by name, moderates chat, and restarts himself when something 
 
 | Area | How |
 | --- | --- |
-| On screen | Animated Hubie (10 expression frames: lip sync from his live voice volume, blinks, breathing and sway, reaction faces for big hits, streaks, follows, polls and chat questions; seasonal sky that follows UTC day and night), the live game, recent results, chat, and a permanent 18+ / demo / gamble-responsibly banner |
+| On screen | Animated Hubie (14 expression frames: two talking poses, picked per line, with lip sync from his live voice volume, blinks, breathing and sway, reaction faces for big hits, streaks, follows, polls and chat questions; seasonal sky that follows UTC day and night), the live game, recent results, chat, and a permanent 18+ / demo / gamble-responsibly banner |
 | Plays | Rotates every 8-15 min between House originals and strategies: Dice (1.5x / 2x / 10x / 50x), Limbo (2x-100x targets), Wheel (low/medium/high risk), Max Win, Plinko, Coinflip |
 | Talks | Comments only on real moments (win streaks, long losing streaks, big hits, droughts ending, milestones), announces and recaps each segment, never leaves long dead air |
 | Chat | Reads Kick chat. Hubie speaks to first-time chatters and real questions; a separate 🤖 chat bot handles text replies, moderation notices and polls. Chat picks games with polls (vote 1-3) and `!play <game>` requests. Follows, subs and gifted subs get a bot post and a spoken thank-you. Replies scale with chat speed: a quiet chat gets answered (but not the same person every line); a busy chat gets newcomers, questions and "Hubie" mentions only, capped per minute, so it never looks spammy |
@@ -101,7 +101,7 @@ game, a gifted Kick sub. Anything mentioning cash, crypto, bonuses, codes or cre
 
 ```
 hubie/      the app
-art/hubie/  Hubie expression frames (idle, 2 talking mouths, 7 moods, blink overlay)
+art/hubie/  Hubie expression frames (2 talking poses with 3 and 4 mouth shapes, 7 moods, blink overlays)
 deploy/     bootstrap.sh (server prep), hubie.service (optional systemd)
 tools/      spike.py (game recon / endurance test / one-time login), find_pack.py
 docs/       architecture diagram
