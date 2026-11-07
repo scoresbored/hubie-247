@@ -191,9 +191,12 @@ class Avatar:
         lv_in = min(1.0, level / max(0.22, self.peak) * 0.85)
         self.talk_level += (lv_in - self.talk_level) * (0.65 if lv_in > self.talk_level else 0.4)
         lv, P = self.talk_level, self.poses[self.pose]
-        cur = min(self.talk_step, len(P["frames"]) - 1)
+        top = len(P["frames"]) - 1
+        if len(P["frames"]) >= 4 and not getattr(self, "happy", False):
+            top -= 1                                      # the big open grin is saved for happy lines
+        cur = min(self.talk_step, top)
         want = cur
-        while want < len(P["up"]) and lv > P["up"][want]:
+        while want < min(len(P["up"]), top) and lv > P["up"][want]:
             want += 1
         while want > 0 and lv < P["down"][want - 1]:
             want -= 1

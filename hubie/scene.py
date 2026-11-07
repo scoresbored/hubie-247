@@ -157,6 +157,11 @@ class Scene:
             self.history = []
             self._dirty = True
 
+    def happy_talk(self, on):
+        """While Hubie says a happy line (big hit, follow, winner) his mouth may open into the big grin."""
+        if self.avatar:
+            self.avatar.happy = bool(on)
+
     def pop(self, cmd, user):
         """Chat command pop-out. Returns (True, mood, confetti) or (False, reason)."""
         with self.lock:

@@ -30,7 +30,7 @@ BANTER = ["why sloths make great dice players", "the 3am crowd", "what Hubie doe
 SPEECH = asyncio.Lock()
 
 
-async def say(scene, voice, brain, line, max_age=20):
+async def say(scene, voice, brain, line, max_age=20, happy=False):
     """Speak a line. If Hubie is busy and the line waits longer than max_age seconds,
     it's dropped instead of being said late (so he never falls behind what's happening)."""
     asked = time.time()
@@ -39,7 +39,11 @@ async def say(scene, voice, brain, line, max_age=20):
         if waited > max_age:
             log("say_dropped", line=line[:80], waited=round(waited, 1))
             return
-        await _say(scene, voice, brain, line)
+        scene.happy_talk(happy)                       # big grin only for happy lines
+        try:
+            await _say(scene, voice, brain, line)
+        finally:
+            scene.happy_talk(False)
 
 
 async def _say(scene, voice, brain, line):
@@ -139,7 +143,7 @@ async def alert(scene, voice, brain, kick, kind, info):
     if not line:
         t_named, t_anon = ALERT_TEMPLATES[kind]
         line = (t_named if user else t_anon).format(u=user, n=n)
-    await say(scene, voice, brain, line, max_age=45)
+    await say(scene, voice, brain, line, max_age=45, happy=True)
 
 
 class ChatState:
@@ -256,9 +260,9 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None
     last_spoke = time.time()
     last_rg = time.time()
 
-    async def speak(line, max_age=12):
+    async def speak(line, max_age=12, happy=False):
         nonlocal last_spoke
-        await say(scene, voice, brain, line, max_age)
+        await say(scene, voice, brain, line, max_age, happy=happy)
         last_spoke = time.time()
 
     await speak("Hubie here. Grab a branch, we're playing some House originals in demo mode. Eighteen plus, zero real money.")
@@ -329,7 +333,7 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None
                 if not line:
                     log("line_rejected", raw=raw)
                 else:
-                    await speak(line)
+                    await speak(line, happy=reason.startswith(("a big hit", "finally a hit")) or "hits in a row" in reason)
             if time.time() - last_rg > 600:                  # responsible-gambling reminder every ~10 min
                 await speak(safety.rg_line(), max_age=120)
                 last_rg = time.time()
@@ -376,7 +380,7 @@ async def run_giveaway(scene, voice, brain, kick, state, prize, minutes):
     scene.effect("confetti", 4.0)
     if kick:
         await kick.bot(f"🎉 @{winner} wins the giveaway: {prize}! ({len(g.entrants)} entered)")
-    await say(scene, voice, brain, max_age=40, line=f"And the winner is {winner}! Congrats, enjoy your {prize}.")
+    await say(scene, voice, brain, max_age=40, happy=True, line=f"And the winner is {winner}! Congrats, enjoy your {prize}.")
 
 
 HUMAN_CONTROLS = os.environ.get("HUBIE_HUMAN_CONTROLS", "0") == "1"
