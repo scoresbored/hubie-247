@@ -87,6 +87,18 @@ class Kick:
         except Exception as e:
             log("kick_say_error", err=repr(e)[:200])
 
+    async def delete(self, msg_id):
+        """Remove a chat message (needs the moderation:chat_message:manage scope)."""
+        if not msg_id:
+            return
+        try:
+            r = await self._req("DELETE", f"/chat/{msg_id}")
+            log("kick_delete", msg_id=str(msg_id)[:40], status=r.status_code)
+            if r.status_code in (401, 403):
+                log("kick_delete_error", err="missing scope: run python -m hubie.kick_auth again")
+        except Exception as e:
+            log("kick_mod_error", err=repr(e)[:200])
+
     async def timeout(self, user_id, minutes, reason):
         try:
             r = await self._req("POST", "/moderation/bans", json={

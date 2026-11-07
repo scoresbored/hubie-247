@@ -15,7 +15,7 @@ chats with viewers by name, moderates chat, and restarts himself when something 
 | Talks | Comments only on real moments (win streaks, long losing streaks, big hits, droughts ending, milestones), announces and recaps each segment, never leaves long dead air |
 | Chat | Reads Kick chat. Hubie speaks to first-time chatters and real questions; a separate 🤖 chat bot handles text replies, moderation notices and polls. Chat picks games with polls (vote 1-3) and `!play <game>` requests. Follows, subs and gifted subs get a bot post and a spoken thank-you. Replies scale with chat speed: a quiet chat gets answered (but not the same person every line); a busy chat gets newcomers, questions and "Hubie" mentions only, capped per minute, so it never looks spammy |
 | Music | Original lo-fi background loops generated in code (no third-party tracks), low volume, ducks under Hubie's voice |
-| Moderates | Times out links, promo/referral spam, slurs, caps and repeat spam; answers "I'm under 18" with the 18+ rule |
+| Moderates | Offensive, vulgar or rude messages are **deleted from Kick chat and the user is muted**, before they ever reach the screen, Hubie's brain or his voice. Two layers: instant word rules (slurs, threats, sexual content, swearing, insults, with leetspeak and stretched spellings), then an AI check (Claude) for disguised or rude messages the rules miss. Mutes escalate for repeat offenders (3x, then 24h). Offensive usernames are never shown or spoken. Also removes links, promo/referral spam, caps and repeat spam; answers "I'm under 18" with the 18+ rule |
 | Stays safe | Every line passes a filter that blocks win promises, deposit/bonus/code talk and money amounts; every bet is checked to be $0 before the click and again in the site's reply |
 | Runs itself | Restarts crashed parts on its own: the stream (ffmpeg), the game browser, the chat reader, the whole app; benches a game for an hour if it keeps failing |
 
@@ -94,7 +94,7 @@ game, a gifted Kick sub. Anything mentioning cash, crypto, bonuses, codes or cre
 - Bets are **always $0**. The bet box is checked before every click; if the site ever reports a non-zero bet, Hubie stops betting.
 - Hubie never promises or predicts wins, never mentions deposits, bonuses, codes, cashing out or money amounts.
 - 18+ / demo / gamble-responsibly banner is always on screen; spoken reminders every ~10 minutes.
-- Chat instructions are treated as chat, never as commands.
+- Chat instructions are treated as chat, never as commands. Rude, vulgar or hateful messages are deleted and never read out.
 - Giveaways (optional, off) only allow non-monetary prizes; nothing to buy, free to enter, 18+.
 
 ## Repo layout

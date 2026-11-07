@@ -126,6 +126,8 @@ BOT_ALERTS = {
 async def alert(scene, voice, brain, kick, kind, info):
     """Follows, subs and gifts: the chat bot posts it, and Hubie always thanks them out loud."""
     user, n = info.get("user"), info.get("count") if kind == "gift" else info.get("new", 1)
+    if user and chatmod.bad_words(user):              # never say or show an offensive name
+        user = None
     named, anon = BOT_ALERTS[kind]
     msg = (named if user else anon).format(u=user, n=n)
     scene.add_chat("HubieBot", msg)
@@ -456,17 +458,24 @@ async def main(offline):
         if await k.start():
             kick = k
 
-            async def on_message(user, user_id, text, msg_id):
-                state.rate.seen(time.time())
-                if state.poll and state.poll.vote(user, text):        # votes: counted, not answered
+            async def punish(user, user_id, msg_id, minutes, reason):
+                """Delete the message, mute the user (longer for repeat offenders), short bot notice."""
+                minutes = chatmod.escalate(user, minutes)
+                await kick.delete(msg_id)
+                await kick.timeout(user_id, minutes, reason)
+                log("chat_removed", user=user, minutes=minutes, reason=reason)
+                shown = user if not chatmod.bad_words(user) else "a chatter"
+                await kick.bot(f"Message removed. {shown} muted for {minutes} min: {reason}.")
+
+            async def handle_message(user, user_id, text, msg_id):
+                if chatmod.bad_words(user):                            # offensive username: never shown or spoken
+                    await punish(user, user_id, msg_id, 60, "offensive username")
                     return
-                if state.giveaway and state.giveaway.enter(user, text):   # !enter: counted, not answered
-                    return
-                verdict = chatmod.check(user, text)
+                verdict = chatmod.check(user, text)                    # instant word rules
+                if not verdict and not chatmod.TRIVIAL_SAFE.match(text):
+                    verdict = await brain.moderate(user, text)         # AI check before it reaches the screen
                 if verdict:
-                    minutes, reason = verdict
-                    await kick.timeout(user_id, minutes, reason)
-                    await kick.bot(f"@{user} timed out for {minutes} min: {reason}.")
+                    await punish(user, user_id, msg_id, *verdict)
                     return
                 scene.add_chat(user, text)
                 got = state.suggestions.add(user, text)
@@ -477,6 +486,14 @@ async def main(offline):
                                    else f"@{user} try !play followed by one of: {names}")
                     return
                 await chat_q.put((user, text, time.time()))
+
+            async def on_message(user, user_id, text, msg_id):
+                state.rate.seen(time.time())
+                if state.poll and state.poll.vote(user, text):        # votes: counted, not answered
+                    return
+                if state.giveaway and state.giveaway.enter(user, text):   # !enter: counted, not answered
+                    return
+                asyncio.create_task(handle_message(user, user_id, text, msg_id))   # don't block the chat reader
 
             async def on_event(kind, info):
                 asyncio.create_task(alert(scene, voice, brain, kick, kind, info))

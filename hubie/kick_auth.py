@@ -20,7 +20,7 @@ from .config import ROOT
 from .kick import TOKEN_URL, TOKENS
 
 REDIRECT = "http://localhost:8765/callback"
-SCOPES = "user:read channel:read channel:write chat:write events:subscribe moderation:ban"
+SCOPES = "user:read channel:read channel:write chat:write events:subscribe moderation:ban moderation:chat_message:manage"
 
 
 def main():
