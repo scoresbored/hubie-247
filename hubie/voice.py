@@ -33,7 +33,7 @@ def envelope(wav_path, fps=FPS):
     return env, n / sr
 
 
-SPEED = float(os.environ.get("HUBIE_VOICE_SPEED", "1.3"))
+SPEED = float(os.environ.get("HUBIE_VOICE_SPEED", "1.15"))
 PITCH = float(os.environ.get("HUBIE_VOICE_PITCH", "1.0"))
 
 
