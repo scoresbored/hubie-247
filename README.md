@@ -79,6 +79,36 @@ stream key and a Kick developer app, an Anthropic API key, and a Housebets accou
 - **Hosting:** Hetzner Cloud CPX32, Ubuntu 24.04
 - No templates or starter kits were used.
 
+## Future upgrades: better animation and voice
+
+Hubie's look and voice are built to be swapped without touching the rest of the system, so the
+stream can grow into a fully official Hubie:
+
+**Animation**
+- **Official art pack:** every expression and pose is a drop-in image (`art/hubie/` for the talking
+  frames and moods, `art/hubie/body/` for full-body moves). Swap in official Housebets artwork and
+  the cutout tool (`tools/cutout_body.py`) prepares it; nothing else changes.
+- **Rigged, fully animated Hubie:** replace the frame-based avatar with a rigged model (Live2D,
+  Spine or Rive) for smooth head turns, real phoneme lip shapes and in-between motion. The avatar
+  is one module (`hubie/avatar.py`) with a simple interface, so the renderer, moods and lip-sync
+  signal stay the same.
+- **More moves and moods:** each new full-body pose image becomes a new chat command
+  automatically; more talking poses and phoneme mouth shapes (A/E/O/M/F) would sharpen the lip sync.
+- **Seasonal outfits:** the monthly theme system can also switch Hubie's outfit (winter scarf in
+  December, party hat in January) using the same image drop-in.
+
+**Voice**
+- **Hubie's official voice:** the voice is one setting (`HUBIE_VOICE_MODEL`). A custom Piper voice
+  trained on an official Hubie voice actor, or a premium neural voice service (e.g. ElevenLabs),
+  plugs straight in; lip sync already follows whatever audio comes out.
+- **Expressive delivery:** happy lines already open into his big grin; the same "happy" flag can
+  drive a livelier speaking style (faster, brighter) for wins and a slower, sleepier one for late
+  nights.
+
+**Interaction**
+- Community controls for mods (`/poll`, `/giveaway`), already built and switched off for the
+  contest (see below).
+
 ## Future feature: community controls (built, off by default)
 
 Streamers and mods could run things from Telegram: `/poll` starts a chat poll for Hubie's next game right now,
