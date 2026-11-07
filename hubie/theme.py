@@ -169,40 +169,12 @@ class Theme:
                 y = (b * (s + 40) + t * speed) % (s + 40) - 20
                 x = a * s + math.sin(t * (0.6 + c) + e * 6) * (10 if kind != "snow" else 6)
                 ang = t * (1 + 2 * f) + e * 6
-                if kind == "snow":
-                    r = 1.5 + 2.5 * f
-                    d.ellipse((x - r, y - r, x + r, y + r), fill=(255, 255, 255, 200))
-                elif kind in ("leaves", "leaves_gold"):
-                    cols = LEAF_COLS if kind == "leaves" else GOLD_COLS
-                    col = cols[int(f * len(cols)) % len(cols)]
-                    sc = 0.7 + 0.6 * c
-                    d.polygon(_rot([(px * sc, py * sc * abs(math.cos(ang * 0.7))) for px, py in LEAF], x, y, ang),
-                              fill=col + (230,))
-                elif kind == "petals":
-                    col = (255, 190, 215) if f > 0.4 else (255, 240, 245)
-                    d.polygon(_rot([(px * 0.6, py * 0.9 * abs(math.cos(ang))) for px, py in LEAF], x, y, ang),
-                              fill=col + (220,))
-                elif kind == "confetti":
-                    col = CONFETTI[int(f * 4.99)]
-                    w = 3 * abs(math.cos(ang * 2)) + 0.5
-                    d.polygon(_rot([(-w, -2.5), (w, -2.5), (w, 2.5), (-w, 2.5)], x, y, ang), fill=col + (235,))
-                elif kind == "clovers":
-                    for k in range(3):
-                        cx, cy = x + 4.5 * math.cos(ang + k * 2.09), y + 4.5 * math.sin(ang + k * 2.09)
-                        d.ellipse((cx - 4, cy - 4, cx + 4, cy + 4), fill=(70, 190, 90, 210))
-                elif kind == "flowers":
-                    col = [(255, 170, 200), (255, 230, 120), (190, 160, 255), (255, 255, 255)][int(f * 3.99)]
-                    for k in range(5):
-                        cx, cy = x + 4 * math.cos(ang + k * 1.257), y + 4 * math.sin(ang + k * 1.257)
-                        d.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=col + (220,))
-                    d.ellipse((x - 2, y - 2, x + 2, y + 2), fill=(255, 210, 80, 240))
+                draw_motif(d, kind, x, y, ang, c, f)
             elif kind == "hearts":
                 speed = 14 * (0.6 + 0.8 * c)
                 y = s + 20 - (b * (s + 40) + t * speed) % (s + 40)
                 x = a * s + math.sin(t * (0.8 + c) + e * 6) * 8
-                sc = (0.35 + 0.4 * f) * (1 + 0.08 * math.sin(t * 4 + e * 6))
-                col = [(255, 90, 130), (255, 150, 180), (230, 60, 100)][int(f * 2.99)]
-                d.polygon([(x + px * sc, y + py * sc) for px, py in HEART], fill=col + (210,))
+                draw_motif(d, "hearts", x, y, 0, c, f, scale=1 + 0.08 * math.sin(t * 4 + e * 6))
             elif kind == "bats":
                 x = (a * (s + 60) + t * (12 + 14 * c)) % (s + 60) - 30
                 y = s * (0.08 + 0.45 * b) + math.sin(t * 2 + e * 6) * 10
@@ -245,12 +217,122 @@ class Theme:
                     px, py = cx + math.cos(ang) * rad, cy + math.sin(ang) * rad + 10 * k * k
                     d.ellipse((px - 1.8, py - 1.8, px + 1.8, py + 1.8), fill=col + (al,))
         if th.get("lights"):                             # string lights along the top edge
-            for k in range(11):
-                x = s * (k + 0.5) / 11
-                y = 10 + 7 * math.sin(k * 0.9) ** 2
-                on = math.sin(t * 2.2 + k * 1.7) > -0.3
-                col = LIGHTS[k % 4]
-                if k:
-                    d.line((s * (k - 0.5) / 11, 10 + 7 * math.sin((k - 1) * 0.9) ** 2, x, y), fill=(30, 50, 30, 255), width=2)
-                d.ellipse((x - 7, y - 3, x + 7, y + 11), fill=col + (90 if on else 0,))
-                d.ellipse((x - 3.5, y, x + 3.5, y + 8), fill=col + (255 if on else 120,))
+            string_lights(d, 0, s, 8, t, n=11)
+
+
+# ---------- whole-overlay palettes ----------
+# bg, panel, accent (titles, chat names, Hubie's frame), accent2 (HubieBot, highlights),
+# dim (secondary text), line (dividers, empty bars), motif (faint pattern in the panels)
+PALETTES = {
+    "jan": dict(bg=(10, 10, 20), panel=(22, 22, 36), accent=(255, 212, 100), accent2=(205, 212, 235), dim=(165, 165, 185), line=(60, 58, 80), motif="confetti"),
+    "feb": dict(bg=(24, 8, 18), panel=(44, 16, 34), accent=(255, 125, 170), accent2=(255, 190, 210), dim=(200, 155, 175), line=(95, 40, 70), motif="hearts"),
+    "mar": dict(bg=(6, 22, 12), panel=(12, 40, 24), accent=(115, 225, 135), accent2=(245, 210, 95), dim=(150, 190, 160), line=(35, 85, 50), motif="clovers"),
+    "apr": dict(bg=(22, 14, 26), panel=(38, 26, 44), accent=(255, 175, 212), accent2=(175, 225, 165), dim=(190, 165, 190), line=(80, 55, 90), motif="petals"),
+    "may": dict(bg=(12, 22, 14), panel=(24, 40, 28), accent=(255, 220, 120), accent2=(200, 175, 255), dim=(165, 190, 165), line=(50, 85, 55), motif="flowers"),
+    "jun": dict(bg=(6, 22, 32), panel=(12, 40, 56), accent=(255, 205, 85), accent2=(95, 215, 235), dim=(150, 185, 200), line=(30, 80, 100), motif="suns"),
+    "jul": dict(bg=(6, 22, 32), panel=(12, 40, 56), accent=(255, 205, 85), accent2=(95, 215, 235), dim=(150, 185, 200), line=(30, 80, 100), motif="suns"),
+    "aug": dict(bg=(8, 22, 30), panel=(14, 40, 52), accent=(255, 195, 80), accent2=(110, 210, 225), dim=(150, 185, 195), line=(30, 80, 95), motif="suns"),
+    "sep": dict(bg=(24, 18, 8), panel=(42, 32, 14), accent=(242, 192, 72), accent2=(215, 125, 55), dim=(195, 175, 135), line=(90, 70, 35), motif="leaves_gold"),
+    "oct": dict(bg=(16, 8, 22), panel=(30, 14, 40), accent=(255, 140, 40), accent2=(175, 115, 235), dim=(180, 155, 190), line=(70, 40, 85), motif="bats"),
+    "nov": dict(bg=(24, 14, 10), panel=(42, 25, 17), accent=(255, 160, 72), accent2=(235, 112, 52), dim=(200, 168, 140), line=(95, 58, 36), motif="leaves"),
+    "dec": dict(bg=(8, 20, 22), panel=(14, 38, 34), accent=(240, 80, 80), accent2=(110, 210, 130), dim=(165, 195, 185), line=(40, 85, 70), motif="snow"),
+}
+
+
+def palette(now):
+    """Colours for the whole overlay right now (month theme, a little darker at night)."""
+    key = theme_key(now)
+    p = dict(PALETTES[key])
+    dk = darkness(utc_hour(now))
+    for k in ("bg", "panel", "line"):
+        p[k] = tuple(int(v * (1.12 - 0.22 * dk)) for v in p[k])
+    p["key"], p["name"], p["night"] = key, THEMES[key]["name"], dk > 0.5
+    p["cache"] = (key, round(dk * 4))           # overlay is redrawn when this changes
+    return p
+
+
+def decorate(img, rect, pal, seed=1, n=10):
+    """Faint seasonal pattern inside a panel rectangle (static, so it costs nothing per frame)."""
+    x0, y0, x1, y1 = rect
+    layer = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    r = random.Random(seed)
+    kind = pal["motif"]
+    for _ in range(n):
+        x, y = r.random() * (x1 - x0), r.random() * (y1 - y0)
+        ang, c, f = r.random() * 6.28, r.random(), r.random()
+        draw_motif(d, kind, x, y, ang, c, f, alpha=1.0, scale=1.6 + c)
+    a = layer.split()[3].point(lambda v: v * (0.24 if kind == "snow" else 0.16))    # keep it very faint behind text
+    layer.putalpha(a)
+    img.paste(layer, (x0, y0), layer)
+
+
+def draw_motif(d, kind, x, y, ang, c, f, alpha=1.0, scale=1.0):
+    A = lambda v: int(v * alpha)
+    if kind == "snow":
+        if scale <= 1.2:                             # falling snow: soft round flakes
+            r = (1.5 + 2.5 * f) * scale
+            d.ellipse((x - r, y - r, x + r, y + r), fill=(255, 255, 255, A(220)))
+        else:                                        # panel decoration: a lacy six-arm snowflake
+            R = (5 + 4 * f) * scale
+            for k in range(6):
+                a = ang + k * math.pi / 3
+                ex, ey = x + math.cos(a) * R, y + math.sin(a) * R
+                d.line((x, y, ex, ey), fill=(255, 255, 255, A(230)), width=2)
+                for side in (-0.6, 0.6):             # little V branches on each arm
+                    mx, my = x + math.cos(a) * R * 0.6, y + math.sin(a) * R * 0.6
+                    d.line((mx, my, mx + math.cos(a + side) * R * 0.3, my + math.sin(a + side) * R * 0.3),
+                           fill=(255, 255, 255, A(230)), width=1)
+    elif kind in ("leaves", "leaves_gold"):
+        cols = LEAF_COLS if kind == "leaves" else GOLD_COLS
+        col = cols[int(f * len(cols)) % len(cols)]
+        sc = (0.7 + 0.6 * c) * scale
+        d.polygon(_rot([(px * sc, py * sc * max(0.3, abs(math.cos(ang * 0.7)))) for px, py in LEAF], x, y, ang),
+                  fill=col + (A(235),))
+    elif kind == "petals":
+        col = (255, 190, 215) if f > 0.4 else (255, 240, 245)
+        d.polygon(_rot([(px * 0.6 * scale, py * 0.9 * scale * max(0.3, abs(math.cos(ang)))) for px, py in LEAF], x, y, ang),
+                  fill=col + (A(225),))
+    elif kind == "confetti":
+        col = CONFETTI[int(f * 4.99)]
+        w = (3 * abs(math.cos(ang * 2)) + 0.5) * scale
+        h = 2.5 * scale
+        d.polygon(_rot([(-w, -h), (w, -h), (w, h), (-w, h)], x, y, ang), fill=col + (A(235),))
+    elif kind == "clovers":
+        for k in range(3):
+            cx, cy = x + 4.5 * scale * math.cos(ang + k * 2.09), y + 4.5 * scale * math.sin(ang + k * 2.09)
+            rr = 4 * scale
+            d.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=(70, 190, 90, A(215)))
+    elif kind == "flowers":
+        col = [(255, 170, 200), (255, 230, 120), (190, 160, 255), (255, 255, 255)][int(f * 3.99)]
+        for k in range(5):
+            cx, cy = x + 4 * scale * math.cos(ang + k * 1.257), y + 4 * scale * math.sin(ang + k * 1.257)
+            rr = 3 * scale
+            d.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=col + (A(225),))
+        d.ellipse((x - 2 * scale, y - 2 * scale, x + 2 * scale, y + 2 * scale), fill=(255, 210, 80, A(240)))
+    elif kind == "hearts":
+        sc = (0.35 + 0.4 * f) * scale
+        col = [(255, 90, 130), (255, 150, 180), (230, 60, 100)][int(f * 2.99)]
+        d.polygon([(x + px * sc, y + py * sc) for px, py in HEART], fill=col + (A(215),))
+    elif kind == "bats":
+        d.polygon([(x + px * 0.9 * scale, y + py * 1.2 * scale) for px, py in BAT], fill=(140, 90, 170, A(230)))
+    elif kind == "suns":
+        rr = 5 * scale
+        d.ellipse((x - rr, y - rr, x + rr, y + rr), fill=(255, 215, 90, A(230)))
+        for k in range(8):
+            a = ang + k * math.pi / 4
+            d.line((x + math.cos(a) * rr * 1.4, y + math.sin(a) * rr * 1.4, x + math.cos(a) * rr * 2.1,
+                    y + math.sin(a) * rr * 2.1), fill=(255, 215, 90, A(230)), width=2)
+
+
+def string_lights(d, x0, x1, y, t=0.0, n=None):
+    """Holiday bulbs on a wire between x0 and x1."""
+    n = n or max(4, int((x1 - x0) / 28))
+    pts = [(x0 + (x1 - x0) * (k + 0.5) / n, y + 6 * math.sin(k * 0.9) ** 2) for k in range(n)]
+    for a, b in zip(pts, pts[1:]):
+        d.line((a, b), fill=(30, 60, 35), width=2)
+    for k, (x, yy) in enumerate(pts):
+        col = LIGHTS[k % 4]
+        on = math.sin(t * 2.2 + k * 1.7) > -0.3
+        d.ellipse((x - 7, yy - 3, x + 7, yy + 11), fill=col + (90 if on else 0,))
+        d.ellipse((x - 3.5, yy, x + 3.5, yy + 8), fill=col + (255 if on else 120,))

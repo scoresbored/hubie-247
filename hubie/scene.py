@@ -67,6 +67,7 @@ class Scene:
         self.f_small_b = _font(18, True)
         self.f_banner = _font(20, True)
         self.f_title = _font(22, True)
+        self.f_tag = _font(14, True)
         self.game_jpeg = None
         self.game_img = Image.new("RGB", (GAME_BOX[2], GAME_BOX[3]), PANEL)
         self.caption = "Hubie is waking up..."
@@ -82,6 +83,9 @@ class Scene:
         self.poll = None           # (title, [(label, votes)], seconds_left) while a poll runs
         self._base = None
         self._dirty = True
+        from . import theme
+        self._theme = theme
+        self.pal = theme.palette(time.time())
         self.avatar = None
         try:
             from . import avatar
@@ -157,17 +161,21 @@ class Scene:
 
     # ---------- drawing ----------
     def _build_base(self):
-        img = Image.new("RGB", (W, H), BG)
-        d = ImageDraw.Draw(img)
+        P = self.pal
+        BGc, PAN, ACC, ACC2, DIMc, LINE = P["bg"], P["panel"], P["accent"], P["accent2"], P["dim"], P["line"]
+        img = Image.new("RGB", (W, H), BGc)
         img.paste(self.game_img, (0, 0))
         # bottom strip: what's playing + recent results (no captions; Hubie's words are spoken only)
-        d.rectangle(CAPTION_BOX, fill=PANEL)
+        ImageDraw.Draw(img).rectangle(CAPTION_BOX, fill=PAN)
+        self._theme.decorate(img, CAPTION_BOX, P, seed=7, n=14)
+        d = ImageDraw.Draw(img)
+        d.line((0, CAPTION_BOX[1], CAPTION_BOX[2], CAPTION_BOX[1]), fill=ACC, width=3)
         y0 = CAPTION_BOX[1]
         r, h = self.stats["rounds"], self.stats["hits"]
-        d.text((20, y0 + 16), self.status or "Warming up", font=self.f_title, fill=TEAL)
+        d.text((20, y0 + 16), self.status or "Warming up", font=self.f_title, fill=ACC)
         d.text((20, y0 + 48), f"Rounds {r}    Hits {h}" + (f"    ({100 * h // r}%)" if r else ""),
-               font=self.f_small, fill=DIM)
-        d.text((20, y0 + 92), "Recent rolls", font=self.f_small, fill=DIM)
+               font=self.f_small, fill=DIMc)
+        d.text((20, y0 + 92), "Recent rolls", font=self.f_small, fill=DIMc)
         x = 150
         for outcome, win in reversed(self.history):
             label = f"{outcome:.2f}" if isinstance(outcome, (int, float)) else str(outcome)
@@ -181,31 +189,42 @@ class Scene:
         if self.poll:
             title, opts, left = self.poll
             px = 560
-            d.rounded_rectangle((px, y0 + 10, CAPTION_BOX[2] - 12, y0 + 140), 12, fill=(20, 45, 60))
-            d.text((px + 14, y0 + 16), f"{title}  ·  {left}s", font=self.f_small_b, fill=TEAL)
+            box = tuple(min(255, int(v * 1.35) + 6) for v in PAN)
+            d.rounded_rectangle((px, y0 + 10, CAPTION_BOX[2] - 12, y0 + 140), 12, fill=box, outline=ACC, width=2)
+            d.text((px + 14, y0 + 16), f"{title}  ·  {left}s", font=self.f_small_b, fill=ACC)
             total = max(1, sum(v for _, v in opts))
             for i, (label, v) in enumerate(opts):
                 yy = y0 + 44 + i * 30
                 d.text((px + 14, yy), f"{i + 1}", font=self.f_small_b, fill=WHITE)
                 bw = int((CAPTION_BOX[2] - px - 200) * v / total)
-                d.rounded_rectangle((px + 36, yy + 2, px + 36 + max(6, bw), yy + 22), 8, fill=GREEN if v else (40, 70, 85))
+                d.rounded_rectangle((px + 36, yy + 2, px + 36 + max(6, bw), yy + 22), 8, fill=ACC if v else LINE)
                 d.text((px + 44 + max(6, bw), yy), f"{label}  {v}", font=self.f_small, fill=WHITE)
         # right column: title + chat
-        d.rectangle((SIDE_X, 0, W, BANNER_Y), fill=PANEL)
-        d.text((SIDE_X + 16, 332), "HUBIE  LIVE 24/7", font=self.f_title, fill=TEAL)
-        d.line((SIDE_X + 16, 366, W - 16, 366), fill=(40, 70, 85), width=1)
-        y = 374
+        d.rectangle((SIDE_X, 0, W, BANNER_Y), fill=PAN)
+        self._theme.decorate(img, (SIDE_X, 330, W, BANNER_Y), P, seed=3, n=12)
+        d = ImageDraw.Draw(img)
+        d.line((SIDE_X, 0, SIDE_X, BANNER_Y), fill=ACC, width=3)
+        d.text((SIDE_X + 16, 332), "HUBIE  LIVE 24/7", font=self.f_title, fill=ACC)
+        tag = P["name"].upper()
+        d.text((W - 14 - d.textlength(tag, font=self.f_tag), 339), tag, font=self.f_tag, fill=ACC2)
+        if P["key"] == "dec":
+            self._theme.string_lights(ImageDraw.Draw(img, "RGBA"), SIDE_X + 8, W - 8, 360)
+            d = ImageDraw.Draw(img)
+        else:
+            d.line((SIDE_X + 16, 366, W - 16, 366), fill=LINE, width=2)
+        y = 384 if P["key"] == "dec" else 376
         for user, text in self.chat[-8:]:
             d.text((SIDE_X + 16, y), user, font=self.f_small_b,
-                   fill=(255, 196, 90) if user == "HubieBot" else TEAL)
+                   fill=ACC2 if user == "HubieBot" else ACC)
             for ln in _wrap(d, text, self.f_small, 285)[:2]:
                 y += 21
                 d.text((SIDE_X + 16, y), ln, font=self.f_small, fill=WHITE)
             y += 26
             if y > BANNER_Y - 30:
                 break
-        # safety banner, always on screen
+        # safety banner: always on screen and always red, so it stands out in every theme
         d.rectangle((0, BANNER_Y, W, H), fill=(170, 30, 45))
+        d.line((0, BANNER_Y, W, BANNER_Y), fill=ACC, width=2)
         msg = "18+ ONLY   |   DEMO PLAY, NO REAL MONEY   |   GAMBLE RESPONSIBLY   |   AI STREAM"
         tw = d.textlength(msg, font=self.f_banner)
         d.text(((W - tw) / 2, BANNER_Y + 4), msg, font=self.f_banner, fill=WHITE)
@@ -233,7 +252,7 @@ class Scene:
     def _draw_hubie_avatar(self, img, now):
         card = self.avatar.render(now, self._mouth_level(now))
         mood = self.mood if now < self.mood_until else "idle"
-        glow = {"hit": GREEN, "miss": RED}.get(mood, TEAL)
+        glow = {"hit": GREEN, "miss": RED}.get(mood, self.pal["accent"])
         x0, y0 = SIDE_X + (W - SIDE_X - card.width) // 2, 14
         d = ImageDraw.Draw(img)
         d.rounded_rectangle((x0 - 5, y0 - 5, x0 + card.width + 4, y0 + card.height + 4), 32, outline=glow, width=5)
@@ -318,6 +337,9 @@ class Scene:
                 except Exception:
                     pass
                 self.game_jpeg, self._dirty = None, True
+            pal = self._theme.palette(now)
+            if pal["cache"] != self.pal["cache"]:
+                self.pal, self._dirty = pal, True
             if self._dirty or self._base is None:
                 self._base, self._dirty = self._build_base(), False
             frame = self._base.copy()

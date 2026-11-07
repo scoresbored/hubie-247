@@ -31,7 +31,7 @@ safety.py filter every spoken/posted line; responsible-gambling lines
 voice.py  local text-to-speech + mouth-movement envelope
 scene.py  draws every frame (game, Hubie, results, chat, banner)
 avatar.py animated Hubie: mood faces, crossfades, breathing/sway, lip sync, blinks
-theme.py  his background: sky follows the UTC clock (dawn/day/dusk/night) + a theme per month (fall leaves, holiday snow and lights, new-year fireworks, hearts...)
+theme.py  seasonal look for the whole overlay: Hubie's sky follows the UTC clock (dawn/day/dusk/night), and each month has its own palette, panel pattern and animated particles (fall leaves, holiday snow and lights, new-year fireworks, hearts...); the red safety banner never changes
 stream.py pipes frames + voice into ffmpeg -> Kick (auto-restarts)
 audio.py  mixer: exactly one frame of audio per video frame, music bed with ducking, drives the mouth
 music.py  generates original lo-fi background loops (numpy)
