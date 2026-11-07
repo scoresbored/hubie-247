@@ -6,13 +6,15 @@ Run with ./run.sh (it sets up the virtual screen and audio first).
 """
 import argparse
 import asyncio
+import json
+import os
 import random
 import re
 import time
 
 from . import chatfun, chatmod, safety
 from .brain import Brain
-from .config import GAME_URL, LOG_DIR
+from .config import GAME_URL, LOG_DIR, ROOT
 from .game import GameDriver, NonZeroBet
 from .kick import Kick
 from .log import log
@@ -55,9 +57,16 @@ async def _say(scene, voice, brain, line):
 TRIVIAL = re.compile(r"^\s*(lol+|lmao+|gg+|ok+|k|w+|l+|nice|hi+|hey+|yo+|xd+|haha+|\?+|!+|[\W_]+)\s*$", re.I)
 
 
-async def chat_worker(scene, voice, brain, kick, chat_q):
-    """Replies to chat in TEXT quickly. Only some replies are also spoken out loud:
-    first-time chatters, real questions to Hubie, and nothing more than about once every 40s."""
+SPEAK_GAP = {"quiet": 40, "normal": 60, "busy": 90}     # min seconds between spoken chat answers
+
+
+async def chat_worker(scene, voice, brain, kick, chat_q, state=None):
+    """Replies to chat, scaled to how busy chat is (ChatRate):
+    quiet  -> answers most messages (but not the same person every line)
+    normal -> first-timers, questions, people who say "Hubie", plus a few others
+    busy   -> first-timers (text only), questions and mentions, with a cap per minute
+    Only some replies are spoken out loud: newcomers (unless chat is busy) and real questions to Hubie."""
+    rate = state.rate if state else chatfun.ChatRate()
     seen_users = set()
     last_spoken = 0.0
     while True:
@@ -68,24 +77,30 @@ async def chat_worker(scene, voice, brain, kick, chat_q):
         seen_users.add(user.lower())
         if TRIVIAL.match(text) and not first_time:            # "lol", "gg", emotes: no reply needed
             continue
+        question = "?" in text and len(text) > 10
+        mentions = "hubie" in text.lower()
         if chatmod.says_underage(text):
             line = f"{user}, this stream is eighteen plus only, so I can't chat about this one with you. Take care."
-            speak_it = True
+            speak_it, mode = True, rate.mode()
         else:
+            ok, mode = rate.should_reply(user, first_time, question, mentions)
+            if not ok:
+                log("chat_skip", user=user, mode=mode)
+                continue
             if first_time:
                 scene.react("happy", 2.5, soft=True)
-            elif "?" in text or "hubie" in text.lower():
+            elif question or mentions:
                 scene.react("thinking", 2.5, soft=True)
             raw = await brain.reply(user, text, first_time=first_time)
             line = safety.clean(raw)
             if not line:
                 log("line_rejected", raw=raw)
                 continue
-            question = "?" in text and len(text) > 10
-            mentions = "hubie" in text.lower()
             gap = time.time() - last_spoken
-            speak_it = first_time or ((question or mentions) and gap > 40)   # always say hi to newcomers
-        log("chat_reply", to=user, spoken=speak_it, first_time=first_time, secs=round(time.time() - ts, 1))
+            speak_it = (first_time and mode != "busy" and gap > 15) or ((question or mentions) and gap > SPEAK_GAP[mode])
+        rate.replied(user)
+        log("chat_reply", to=user, spoken=speak_it, first_time=first_time, mode=mode,
+            per_min=rate.per_min(), secs=round(time.time() - ts, 1))
         if speak_it:                                   # Hubie answers out loud (no chat-bot text)
             last_spoken = time.time()
             scene.add_chat("Hubie", line)
@@ -130,10 +145,15 @@ class ChatState:
         self.poll = None
         self.pending = None                 # (game_key, strategy, note) chosen by chat
         self.suggestions = chatfun.Suggestions()
+        self.rate = chatfun.ChatRate()
+        self.giveaway = None
+        self.benched, self.current = {}, None
 
 
 async def run_poll(scene, voice, brain, kick, state, benched, current):
     from .games import GAMES
+    if state.poll:                                     # one poll at a time
+        return
     poll = chatfun.make_poll(benched, current)
     if len(poll.options) < 2:
         return
@@ -225,7 +245,7 @@ def pick_segment(benched, recent):
 async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None):
     from .games import GAMES
     state = state or ChatState()
-    benched, recent = {}, []
+    benched, recent = state.benched, []
     seg_no = 0
     last_spoke = time.time()
     last_rg = time.time()
@@ -247,6 +267,7 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None
         else:
             key, strat = pick_segment(benched, recent)
         state.pending = None
+        state.current = key
         seg_no += 1
         recent.append(key)
         try:
@@ -317,6 +338,68 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None
                 await speak(line)
 
 
+async def run_giveaway(scene, voice, brain, kick, state, prize, minutes):
+    """Optional, human-started (off by default). Viewers type !enter; Hubie draws a random winner."""
+    prize = safety.safe_prize(prize)
+    if not prize:
+        log("giveaway_rejected", reason="prize must be non-monetary")
+        return
+    if state.giveaway and state.giveaway.active:
+        return
+    seconds = int(max(1, min(15, minutes)) * 60)
+    g = state.giveaway = chatfun.Giveaway(prize, seconds)
+    log("giveaway_start", prize=prize, seconds=seconds)
+    scene.react("cheering", 3.0)
+    if kick:
+        await kick.bot(f"GIVEAWAY: {prize}! Type !enter to join. Drawing in {seconds // 60} min. "
+                       "Free to enter, nothing to buy, 18+.")
+    await say(scene, voice, brain, max_age=40,
+              line=f"Giveaway time! Type exclamation enter in chat for a chance at {prize}. Free to enter, eighteen plus.")
+    while g.active:
+        if not state.poll:                                   # share the on-screen box with polls
+            scene.set_poll((f"GIVEAWAY: {prize}", [("type !enter", len(g.entrants))], max(0, int(g.ends - time.time()))))
+        await asyncio.sleep(1)
+    winner = g.draw()
+    if not state.poll:
+        scene.set_poll(None)
+    log("giveaway_end", prize=prize, entrants=len(g.entrants), winner=winner)
+    if not winner:
+        if kick:
+            await kick.bot("Giveaway closed with no entries. Next time!")
+        return
+    scene.react("shocked", 1.2, then=[("cheering", 3.5)])
+    if kick:
+        await kick.bot(f"🎉 @{winner} wins the giveaway: {prize}! ({len(g.entrants)} entered)")
+    await say(scene, voice, brain, max_age=40, line=f"And the winner is {winner}! Congrats, enjoy your {prize}.")
+
+
+HUMAN_CONTROLS = os.environ.get("HUBIE_HUMAN_CONTROLS", "0") == "1"
+INBOX = ROOT / "inbox"
+
+
+async def human_inbox(scene, voice, brain, kick, state):
+    """OPTIONAL human controls from the Telegram bot (/poll, /giveaway). Off unless HUBIE_HUMAN_CONTROLS=1.
+    Every command is logged as a human_touch, because the contest counts any human action against the run."""
+    INBOX.mkdir(parents=True, exist_ok=True)
+    while True:
+        await asyncio.sleep(2)
+        for f in sorted(INBOX.glob("*.json")):
+            try:
+                cmd = json.loads(f.read_text())
+            except Exception:
+                cmd = {}
+            f.unlink(missing_ok=True)
+            if not HUMAN_CONTROLS:
+                log("human_cmd_ignored", cmd=cmd.get("cmd"))
+                continue
+            log("human_touch", cmd=cmd.get("cmd"), detail=cmd)
+            if cmd.get("cmd") == "poll" and kick and not state.poll:
+                asyncio.create_task(run_poll(scene, voice, brain, kick, state, state.benched, state.current))
+            elif cmd.get("cmd") == "giveaway":
+                asyncio.create_task(run_giveaway(scene, voice, brain, kick, state,
+                                                 cmd.get("prize", ""), float(cmd.get("minutes", 3))))
+
+
 async def sync_check(streamer, every=300):
     """Every 5 minutes: make sure voice and picture are still together, and fix it if not."""
     from .audio import MIXER
@@ -374,7 +457,10 @@ async def main(offline):
             kick = k
 
             async def on_message(user, user_id, text, msg_id):
+                state.rate.seen(time.time())
                 if state.poll and state.poll.vote(user, text):        # votes: counted, not answered
+                    return
+                if state.giveaway and state.giveaway.enter(user, text):   # !enter: counted, not answered
                     return
                 verdict = chatmod.check(user, text)
                 if verdict:
@@ -398,7 +484,8 @@ async def main(offline):
             tasks.append(asyncio.create_task(kick.read_chat(on_message, on_event)))
     except Exception as e:
         log("kick_start_error", err=repr(e)[:200])
-    tasks.append(asyncio.create_task(chat_worker(scene, voice, brain, kick, chat_q)))
+    tasks.append(asyncio.create_task(chat_worker(scene, voice, brain, kick, chat_q, state)))
+    tasks.append(asyncio.create_task(human_inbox(scene, voice, brain, kick, state)))
     tasks.append(asyncio.create_task(director(scene, game, voice, brain, kick, chat_q, state)))
     done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
     for t in done:

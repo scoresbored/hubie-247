@@ -62,3 +62,17 @@ def fallback():
 
 def rg_line():
     return random.choice(RG_LINES)
+
+
+PRIZE_BLOCK = re.compile(
+    r"(crypto|bitcoin|\bbtc\b|\beth\b|usdt|\bsol\b|token|coin|nft|cash|money|gift ?card|voucher|credit|"
+    r"balance|chips?\b|wager|free ?spin|rakeback|tip\b|paypal|venmo|cash ?app|\d+\s?%)", re.I)
+
+
+def safe_prize(text):
+    """Giveaway prizes must be non-monetary (shoutout, pick the next game, a gifted Kick sub...).
+    Returns the cleaned prize, or None if it looks like money, crypto, bonuses or codes."""
+    text = " ".join((text or "").split())[:60]
+    if not text or BLOCK.search(text) or PRIZE_BLOCK.search(text):
+        return None
+    return text

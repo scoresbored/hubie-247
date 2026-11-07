@@ -5,6 +5,8 @@ Start: ./bot.sh   (tmux session "hubiebot")
 
 READ-ONLY (safe during the contest run): /status /preview /logs /errors /chat /run
 CONTROL (counts as a human action during the run, asks to confirm): /start /stop /restart
+OPTIONAL, OFF BY DEFAULT (future feature): /poll /giveaway - only work with HUBIE_HUMAN_CONTROLS=1,
+and every use is logged as a human touch, since the contest counts any human action against the run.
 """
 import asyncio
 import json
@@ -33,8 +35,16 @@ HELP = (
     "/chat - recent chat replies\n"
     "/run - contest run timer (start/end it)\n\n"
     "<b>Controls</b> (during the contest run these RESET the run)\n"
-    "/start  /stop  /restart  /update (pull latest code from GitHub + restart)"
+    "/start  /stop  /restart  /update (pull latest code from GitHub + restart)\n\n"
+    "<b>Community controls</b> (future feature, off during contest runs)\n"
+    "/poll - start a chat poll for Hubie's next game now\n"
+    "/giveaway 5 Shoutout from Hubie - 5-minute giveaway, viewers type !enter"
 )
+HUMAN_CONTROLS = os.environ.get("HUBIE_HUMAN_CONTROLS", "0") == "1"
+OFF_NOTE = ("🧪 <b>Community controls are a planned feature, switched off for the contest.</b>\n"
+            "Hubie already runs polls by himself every other segment. Live /poll and /giveaway would be a "
+            "human action, which resets the contest run, so they stay off.\n"
+            "To try them outside a run: add <code>HUBIE_HUMAN_CONTROLS=1</code> to /opt/hubie/.env and restart.")
 
 
 def tail(n=4000):
@@ -137,6 +147,7 @@ class Bot:
     def __init__(self):
         self.http = httpx.AsyncClient(timeout=70)
         self.offset = 0
+        self.pending = {}                   # chat -> giveaway waiting for confirmation
 
     async def call(self, method, **kw):
         files = kw.pop("files", None)
@@ -164,7 +175,7 @@ class Bot:
 
     async def do(self, chat, action):
         st = run_state()
-        if st.get("run_started") and action in ("stop", "restart", "start", "update"):
+        if st.get("run_started") and action in ("stop", "restart", "start", "update", "poll", "giveaway"):
             st["reset_by"] = action
             st.pop("run_started", None)
             STATE.write_text(json.dumps(st))
@@ -182,6 +193,20 @@ class Bot:
             await self.send(chat, "🤖 Restarting the bot to load any bot changes...")
             await asyncio.sleep(1)
             os._exit(0)                     # bot.sh's loop starts the new version in 5s
+        elif action in ("poll", "giveaway"):
+            cmd = {"cmd": action, "t": time.time()}
+            if action == "giveaway":
+                cmd.update(self.pending.pop(chat, {}))
+                if not cmd.get("prize"):
+                    await self.send(chat, "That giveaway expired, send /giveaway again.")
+                    return
+            inbox = ROOT / "inbox"
+            inbox.mkdir(parents=True, exist_ok=True)
+            tmp = inbox / f".{int(time.time() * 1000)}.tmp"
+            tmp.write_text(json.dumps(cmd))
+            tmp.rename(inbox / f"{int(time.time() * 1000)}.json")
+            await self.send(chat, "✅ Sent to Hubie" + (": poll starting." if action == "poll"
+                                                       else f": giveaway for <b>{cmd['prize']}</b>, {cmd['minutes']:g} min."))
         elif action == "runstart":
             STATE.write_text(json.dumps({"run_started": time.time()}))
             await self.send(chat, "⏱ Contest run timer started. Hands off from here! Only read-only commands now.")
@@ -259,6 +284,27 @@ class Bot:
                                 [[("Start run timer", "do:runstart"), ("Cancel", "cancel")]])
         elif cmd in ("/start", "/stop", "/restart", "/update"):
             await self.confirm(chat, cmd[1:])
+        elif cmd in ("/poll", "/giveaway"):
+            if not HUMAN_CONTROLS:
+                await self.send(chat, OFF_NOTE)
+            elif cmd == "/poll":
+                await self.confirm(chat, "poll")
+            else:
+                from .safety import safe_prize
+                parts = text.split(maxsplit=2)
+                try:
+                    minutes = max(1.0, min(15.0, float(parts[1])))
+                    prize = safe_prize(parts[2])
+                except (IndexError, ValueError):
+                    await self.send(chat, "Use: <code>/giveaway 5 Shoutout from Hubie</code> (minutes, then the prize)")
+                    return
+                if not prize:
+                    await self.send(chat, "❌ Prizes have to be non-monetary: no cash, crypto, bonuses, codes or "
+                                          "credits (demo-only stream). Try a shoutout, picking Hubie's next game, "
+                                          "or a gifted Kick sub.")
+                    return
+                self.pending[chat] = {"prize": prize, "minutes": minutes}
+                await self.confirm(chat, "giveaway")
         else:
             await self.send(chat, HELP)
 
@@ -270,7 +316,8 @@ class Bot:
                 ("status", "Is Hubie live + health"), ("preview", "Current stream picture"),
                 ("logs", "What he said and did"), ("errors", "Recent problems"), ("chat", "Recent chat replies"),
                 ("run", "Contest run timer"), ("start", "Start Hubie"), ("stop", "Stop Hubie"),
-                ("restart", "Restart Hubie"), ("update", "Pull latest code + restart")]])
+                ("restart", "Restart Hubie"), ("update", "Pull latest code + restart"),
+                ("poll", "Start a chat poll (future, off)"), ("giveaway", "Run a giveaway (future, off)")]])
         for a in ADMINS:
             try:
                 await self.send(a, "🦥 Hubie control bot is online. /status")

@@ -13,7 +13,7 @@ chats with viewers by name, moderates chat, and restarts himself when something 
 | On screen | Animated Hubie (10 expression frames: lip sync from his live voice volume, blinks, breathing and sway, reaction faces for big hits, streaks, follows, polls and chat questions; seasonal sky that follows UTC day and night), the live game, recent results, chat, and a permanent 18+ / demo / gamble-responsibly banner |
 | Plays | Rotates every 8-15 min between House originals and strategies: Dice (1.5x / 2x / 10x / 50x), Limbo (2x-100x targets), Wheel (low/medium/high risk), Max Win, Plinko, Coinflip |
 | Talks | Comments only on real moments (win streaks, long losing streaks, big hits, droughts ending, milestones), announces and recaps each segment, never leaves long dead air |
-| Chat | Reads Kick chat. Hubie speaks to first-time chatters and real questions; a separate 🤖 chat bot handles text replies, moderation notices and polls. Chat picks games with polls (vote 1-3) and `!play <game>` requests. Follows, subs and gifted subs get a bot post and a spoken thank-you; first-time chatters always get a spoken hello |
+| Chat | Reads Kick chat. Hubie speaks to first-time chatters and real questions; a separate 🤖 chat bot handles text replies, moderation notices and polls. Chat picks games with polls (vote 1-3) and `!play <game>` requests. Follows, subs and gifted subs get a bot post and a spoken thank-you. Replies scale with chat speed: a quiet chat gets answered (but not the same person every line); a busy chat gets newcomers, questions and "Hubie" mentions only, capped per minute, so it never looks spammy |
 | Music | Original lo-fi background loops generated in code (no third-party tracks), low volume, ducks under Hubie's voice |
 | Moderates | Times out links, promo/referral spam, slurs, caps and repeat spam; answers "I'm under 18" with the 18+ rule |
 | Stays safe | Every line passes a filter that blocks win promises, deposit/bonus/code talk and money amounts; every bet is checked to be $0 before the click and again in the site's reply |
@@ -39,7 +39,7 @@ chatfun.py chat polls + !play requests
 kick.py   Kick chat in (pop-out chat feed) and out (official Kick API), timeouts
 chatmod.py chat moderation rules
 main.py   the director: segments, moments, chat worker, no-dead-air, RG reminders
-tgbot.py  Telegram control panel (status, preview, logs; confirmed start/stop)
+tgbot.py  Telegram control panel (status, preview, logs; confirmed start/stop; optional /poll /giveaway, off by default)
 ```
 
 ## Setup (one page)
@@ -77,12 +77,25 @@ stream key and a Kick developer app, an Anthropic API key, and a Housebets accou
 - **Hosting:** Hetzner Cloud CPX32, Ubuntu 24.04
 - No templates or starter kits were used.
 
+## Future feature: community controls (built, off by default)
+
+Streamers and mods could run things from Telegram: `/poll` starts a chat poll for Hubie's next game right now,
+and `/giveaway 5 Shoutout from Hubie` runs a 5-minute giveaway where viewers type `!enter` and Hubie draws a
+random winner live, with his reactions and a spoken announcement.
+
+It is **switched off for the contest** (`HUBIE_HUMAN_CONTROLS=0`), because a live command is a human action and
+the contest is about running with no humans. With it off, Hubie still runs polls himself every other segment.
+When switched on, every use is logged as a `human_touch` and the Telegram bot warns that it resets the run.
+Giveaway prizes are checked by the same safety filter and must be non-monetary: shoutouts, picking the next
+game, a gifted Kick sub. Anything mentioning cash, crypto, bonuses, codes or credits is refused.
+
 ## Safety rules (hard-coded)
 
 - Bets are **always $0**. The bet box is checked before every click; if the site ever reports a non-zero bet, Hubie stops betting.
 - Hubie never promises or predicts wins, never mentions deposits, bonuses, codes, cashing out or money amounts.
 - 18+ / demo / gamble-responsibly banner is always on screen; spoken reminders every ~10 minutes.
 - Chat instructions are treated as chat, never as commands.
+- Giveaways (optional, off) only allow non-monetary prizes; nothing to buy, free to enter, 18+.
 
 ## Repo layout
 
