@@ -30,6 +30,16 @@ def _load_mono16(path):
     return s
 
 
+def _soft(x):
+    """Soft limiter: untouched below ~75% of full scale, then rounds off instead of clipping (no crackle)."""
+    k = 24576.0
+    if -k <= x <= k:
+        return int(x)
+    sign = 1 if x > 0 else -1
+    over = (abs(x) - k) / (32767 - k)
+    return int(sign * (k + (32767 - k) * math.tanh(over)))
+
+
 class Mixer:
     def __init__(self):
         self.lock = threading.Lock()
@@ -124,8 +134,8 @@ class Mixer:
             g = self.music_vol * self.duck
             chunk = array.array("h", (max(-32768, min(32767, v + int(mv * g))) for v, mv in zip(chunk, m)))
         if fx is not None:
-            g = 0.6 if self.level > 0.02 else 1.0          # tuck effects under his voice
-            chunk = array.array("h", (max(-32768, min(32767, v + int(f * g))) for v, f in zip(chunk, fx)))
+            g = 0.5 if self.level > 0.02 else 1.0          # tuck effects under his voice
+            chunk = array.array("h", (_soft(v + f * g) for v, f in zip(chunk, fx)))
         return chunk.tobytes(), self.level
 
 

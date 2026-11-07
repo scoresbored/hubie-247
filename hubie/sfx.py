@@ -71,10 +71,9 @@ def _seq(notes, step, fn):
 
 
 # ---------- the sounds ----------
-def pop_in():
-    s = _sweep(260, 950, 0.13) * _env(int(0.13 * RATE), 0.003, 0.05)
-    w = _bp(_noise(0.18, 1), 3, 30) * np.linspace(0.6, 0, int(0.18 * RATE))
-    return _at([(0, s * 0.8), (0, w * 0.5)])
+def pop_in():         # clean "bloop" up (pure tone, no noise)
+    s = _sweep(260, 950, 0.14) * _env(int(0.14 * RATE), 0.003, 0.06)
+    return s * 0.8
 
 
 def duck_out():
@@ -105,19 +104,19 @@ def flex():           # power-up riser + boing
     return _at([(0, rise), (0.7, boing * np.exp(-t * 7) * 0.8)])
 
 
-def nap():            # two soft snores with a whistle on the way out
-    def snore(seed):
-        n = _lp(_noise(0.9, seed), 40)
-        mod = 0.5 + 0.5 * np.sin(2 * np.pi * 28 * _t(0.9))
-        body = n * mod * np.sin(np.linspace(0, np.pi, len(n))) * 3
-        whistle = _sweep(900, 1500, 0.5) * np.sin(np.linspace(0, np.pi, int(0.5 * RATE))) * 0.25
-        return _at([(0, body), (0.95, whistle)])
-    return _at([(0, snore(2)), (1.7, snore(3))])
+def nap():            # two sleepy "zzz" hums with a soft whistle (tones only)
+    def snore():
+        t = _t(0.9)
+        hum = (np.sin(2 * np.pi * 110 * t) + 0.4 * np.sin(2 * np.pi * 220 * t)) * (0.6 + 0.4 * np.sin(2 * np.pi * 6 * t))
+        hum *= np.sin(np.linspace(0, np.pi, len(t))) * 0.5
+        whistle = _sweep(900, 1400, 0.5) * np.sin(np.linspace(0, np.pi, int(0.5 * RATE))) * 0.22
+        return _at([(0, hum), (0.95, whistle)])
+    return _at([(0, snore()), (1.7, snore())])
 
 
-def hmm():            # tick... tock... tick... tock
-    tick = lambda f: _bp(_noise(0.05, int(f)), 2, 12) * np.exp(-_t(0.05) * 120) * 1.5 + _tone(f, 0.05, 60) * 0.3
-    return _seq([2400, 1800, 2400, 1800], 0.42, tick)
+def hmm():            # tick... tock... (wood-block tones)
+    block = lambda f: (np.sin(2 * np.pi * f * _t(0.08)) + 0.3 * np.sin(2 * np.pi * f * 2.3 * _t(0.08))) * np.exp(-_t(0.08) * 55) * 0.8
+    return _seq([1200, 900, 1200, 900], 0.42, block)
 
 
 def _bell(f, secs=0.9, decay=4.0):
@@ -158,9 +157,9 @@ def facepalm():       # sad trombone: wah wah wah wahhh
     return _at([(0, note(311, 0.3)), (0.33, note(294, 0.3)), (0.66, note(277, 0.3)), (0.99, note(262, 0.9, True))])
 
 
-def snack():          # munch munch munch
-    crunch = lambda seed: _bp(_noise(0.12, seed), 2, 8) * np.exp(-_t(0.12) * 30) * 1.2
-    return _at([(0, crunch(4)), (0.28, crunch(5)), (0.56, crunch(6)), (0.84, crunch(7))])
+def snack():          # cartoon "nom nom nom" (little falling blips)
+    nom = lambda f: _sweep(f, f * 0.6, 0.11) * _env(int(0.11 * RATE), 0.004, 0.05) * 0.7
+    return _seq([520, 470, 540, 480], 0.26, nom)
 
 
 def lol():            # boing boing boing
