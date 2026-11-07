@@ -225,8 +225,7 @@ class Moments:
 def react_to(scene, reason):
     """Pick Hubie's face for a notable round (the Moments reason text)."""
     if reason.startswith("a big hit"):
-        scene.react("shocked", 1.3, then=[("cheering", 3.5)], big=True)
-        scene.effect("confetti", 3.5)
+        scene.effect("confetti", 3.5)                    # his box stays calm: he just talks about it
     elif reason.startswith("finally a hit"):
         scene.react("cheering", 3.0)
     elif "hits in a row" in reason:
@@ -236,7 +235,6 @@ def react_to(scene, reason):
             scene.effect("confetti", 2.5)
     elif "misses in a row" in reason:
         scene.react("facepalm", 3.5)
-        scene.effect("rain", 5.0)
     elif reason.startswith("round "):
         scene.react("happy", 2.5)
 
@@ -375,7 +373,6 @@ async def run_giveaway(scene, voice, brain, kick, state, prize, minutes):
         if kick:
             await kick.bot("Giveaway closed with no entries. Next time!")
         return
-    scene.react("shocked", 1.2, then=[("cheering", 3.5)], big=True)
     scene.effect("confetti", 4.0)
     if kick:
         await kick.bot(f"🎉 @{winner} wins the giveaway: {prize}! ({len(g.entrants)} entered)")

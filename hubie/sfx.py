@@ -120,11 +120,32 @@ def hmm():            # tick... tock... tick... tock
     return _seq([2400, 1800, 2400, 1800], 0.42, tick)
 
 
-def cheer():          # party horn + crackle
-    t = _t(0.7)
-    horn = _sweep(380, 520, 0.7, "saw", 0.4) * _env(len(t), 0.01, 0.2) * 0.4
-    horn = _lp(horn, 3)
-    return _at([(0, horn), (0.1, confetti() * 0.6)])
+def _bell(f, secs=0.9, decay=4.0):
+    """Soft bell/glock tone: a pure partial plus gentle inharmonic shimmer."""
+    t = _t(secs)
+    return (np.sin(2 * np.pi * f * t) + 0.35 * np.sin(2 * np.pi * f * 2.76 * t) * np.exp(-t * 6)
+            + 0.15 * np.sin(2 * np.pi * f * 5.4 * t) * np.exp(-t * 12)) * np.exp(-t * decay) * _env(len(t), 0.004, 0.05)
+
+
+def _sparkles(secs=1.2, n=14, seed=30):
+    rng = np.random.default_rng(seed)
+    notes = [2093, 2349, 2637, 3136, 3520]                        # high C major-pentatonic glitter
+    return _at([(rng.uniform(0, secs * 0.8), _bell(float(rng.choice(notes)), 0.35, 9) * rng.uniform(0.15, 0.35))
+                for _ in range(n)], secs)
+
+
+def fanfare():
+    """Bright little 'ta-da-DAA': rising C-E-G then a held C major chord with a soft brass-ish pad."""
+    run = _seq([523, 659, 784], 0.09, lambda f: _bell(f, 0.3, 7) * 0.7)
+    t = _t(1.1)
+    pad = sum(np.sin(2 * np.pi * f * t) + 0.3 * np.sin(2 * np.pi * 2 * f * t) for f in (523, 659, 784))
+    pad = pad * np.minimum(1, t / 0.04) * np.exp(-t * 2.2) * 0.22
+    top = _bell(1047, 1.1, 2.8) * 0.6
+    return _at([(0, run), (0.27, pad), (0.27, top)])
+
+
+def cheer():          # fanfare + sparkles
+    return _at([(0, fanfare()), (0.25, _sparkles(1.2, 12, 31))])
 
 
 def facepalm():       # sad trombone: wah wah wah wahhh
@@ -156,11 +177,10 @@ def dapper():         # sparkly twinkle
                 enumerate(rng.choice([1568, 1760, 2093, 2349, 2637], 8))]) * 0.6
 
 
-def confetti():       # party popper: bang + crackle tail
-    bang = _bp(_noise(0.08, 9), 1, 6) * np.exp(-_t(0.08) * 40) * 1.4
-    rng = np.random.default_rng(10)
-    crackle = _at([(rng.uniform(0, 1.2), _bp(_noise(0.012, i), 1, 4) * rng.uniform(0.2, 0.6)) for i in range(60)])
-    return _at([(0, bang), (0.05, crackle)])
+def confetti():       # celebration: soft pop, a rising chime run and glitter (no harsh noise)
+    pop = _sweep(900, 300, 0.05) * np.exp(-_t(0.05) * 50) * 0.5
+    run = _seq([784, 988, 1175, 1568], 0.06, lambda f: _bell(f, 0.4, 7) * 0.55)
+    return _at([(0, pop), (0.03, run), (0.2, _sparkles(1.3, 16, 32))])
 
 
 def rain(secs=5.0):
