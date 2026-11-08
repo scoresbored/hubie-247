@@ -75,6 +75,10 @@ class Avatar:
                             self.gaze_frames[(n, g, st)] = im.resize((size, size), Image.LANCZOS)
             if (ART / p["blink"]).exists():
                 self.blinks[k] = load(p["blink"])
+        self.cam = self._load_cam(size)     # video loops for the cam: {pose: {"talk": (frames, open), "idle": ...}}
+        self.cam_pos = {"talk": 0.0, "idle": 0.0}
+        self.cam_t = 0.0
+        self.cam_mode = None
         self.pose = "A"
         self.talk_step = 0
         self.next_pose_swap = 0.0
@@ -116,6 +120,49 @@ class Avatar:
         ImageDraw.Draw(glow).ellipse((s * 0.12, s * 0.08, s * 0.88, s * 0.84), fill=(110, 225, 225, 38))
         card.alpha_composite(glow.filter(ImageFilter.GaussianBlur(s * 0.08)))
         return card
+
+    @staticmethod
+    def _load_cam(size):
+        """Grok video loops (tools/grok_pose.py cam): idle and talking, per pose, with mouth openness per frame."""
+        import json
+        out = {}
+        base = ART / "cam"
+        for d in sorted(base.glob("*_*")) if base.exists() else []:
+            pose, mode = d.name.split("_", 1)
+            files = sorted(d.glob("frame_*.png"))
+            if len(files) < 12 or mode not in ("talk", "idle"):
+                continue
+            frames = [Image.open(f).convert("RGBA").resize((size, size), Image.LANCZOS) for f in files]
+            try:
+                opened = json.loads((d / "mouth.json").read_text())["open"][:len(frames)]
+            except Exception:
+                opened = [0.5] * len(frames)
+            out.setdefault(pose, {})[mode] = (frames, opened)
+        return {p: v for p, v in out.items() if "talk" in v and "idle" in v}
+
+    def _cam_frame(self, now, speaking):
+        """The cam video frame for this moment, or None if this pose has no video loops.
+        Idle: the idle loop plays forward then backward (no seam). Talking: the talking loop keeps moving
+        forward for natural head motion, but from the next few frames it shows the one whose mouth opening
+        best matches the voice right now, so the lips follow the words."""
+        loops = self.cam.get(self.pose)
+        if not loops:
+            return None
+        dt = min(0.1, max(0.0, now - self.cam_t)) if self.cam_t else 1 / 30
+        self.cam_t = now
+        mode = "talk" if speaking else "idle"
+        frames, opened = loops[mode]
+        n = len(frames)
+        self.cam_pos[mode] += dt * 12
+        if mode == "idle":
+            p = int(self.cam_pos["idle"]) % (2 * n - 2)
+            return frames[p if p < n else 2 * n - 2 - p], mode
+        target = min(1.0, self.talk_level * 1.15)
+        if not getattr(self, "happy", False):
+            target = min(target, 0.75)                    # widest mouths are for happy lines
+        base = int(self.cam_pos["talk"])
+        best = min(range(base, base + 4), key=lambda i: abs(opened[i % n] - target) + 0.04 * (i - base))
+        return frames[best % n], mode
 
     # ---------- control ----------
     def react(self, mood, secs=2.5, then=None, soft=False, now=0.0):
@@ -234,6 +281,16 @@ class Avatar:
         speaking = now - self.last_voice < 0.35
         self._update_gaze(now, speaking, key not in self.pose_of)
         img = self.frames[key]
+        cam = self._cam_frame(now, speaking) if key in self.pose_of else None
+        if cam is not None:                                # video loop instead of stills (own eyes, mouth, blinks)
+            img, mode = cam
+            group = f"cam{self.pose}_{mode}"
+            if group != self.shown:
+                self.prev, self.fade_t0, self.shown = self._last, now, group
+            if self.prev is not None and now - self.fade_t0 < 0.2:
+                img = Image.blend(self.prev, img, (now - self.fade_t0) / 0.2)
+            self._last = img
+            return self._finish(img, now, key, motion)
         g = self.gaze
         if key in self.pose_of and abs(g) > 0.05:
             st = max(1, min(3, round(abs(g) * 3)))
@@ -265,6 +322,9 @@ class Avatar:
             img = Image.blend(self.prev, img, (now - self.fade_t0) / FADE)
         self._last = img
 
+        return self._finish(img, now, key, motion)
+
+    def _finish(self, img, now, key, motion):
         # body motion
         amp, spd, sway, sspd, style = MOTION.get(motion, MOTION["idle"])
         t, age = now, now - self.mood_t0
