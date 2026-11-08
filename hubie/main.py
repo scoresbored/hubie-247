@@ -161,6 +161,7 @@ class ChatState:
         self.refresh_browser = None         # set by the janitor: reason to restart the browser between games
         self.last_round = time.time()
         self.on_break = False
+        self.move_told = {}                 # viewer -> when the bot last explained a move cooldown
 
 
 async def run_poll(scene, voice, brain, kick, state, benched, current):
@@ -638,10 +639,22 @@ async def main(offline):
                             state.help_said = now
                             moves = " ".join("!" + c for c in scene.popout.available())
                             games = "/".join(sorted(GAMES_KEYS()))
-                            await kick.bot(f"Make Hubie move: {moves} (1 per minute each) | Pick the next game: !play {games}")
+                            await kick.bot(f"Make Hubie move: {moves} (one every 20s each) | Pick the next game: !play {games}")
                         return
                     ok = scene.pop(cmd, user)
                     log("popout", user=user, cmd=cmd, ok=ok[0], why=None if ok[0] else ok[1])
+                    if not ok[0] and ok[1] in ("cooldown", "busy"):         # tell them why, once per wait
+                        now = time.time()
+                        told = state.move_told.get(user.lower(), 0)
+                        if now - told > 20:
+                            state.move_told[user.lower()] = now
+                            msg = (f"@{user} Hubie's catching his breath, try !{cmd} again in {ok[2]}s."
+                                   if ok[1] == "cooldown" else
+                                   f"@{user} another move is on screen, try !{cmd} again in a few seconds.")
+                            try:
+                                await kick.bot(msg)
+                            except Exception:
+                                pass
                     return
                 asyncio.create_task(handle_message(user, user_id, text, msg_id))   # don't block the chat reader
 

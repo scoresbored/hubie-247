@@ -39,7 +39,7 @@ ENTER, EXIT = 0.45, 0.35
 HOLD = 4.2             # seconds he stays up
 GAP = 6.0              # quiet seconds between pop-outs
 ANIM_FPS = 12          # playback speed of animated moves
-USER_COOLDOWN = 60.0   # per viewer
+USER_COOLDOWN = 20.0   # per viewer
 
 
 def _font(size, bold=True):
@@ -108,8 +108,9 @@ class Popout:
             return False, "not yet"
         if self.active or now - self.last_end < GAP:
             return False, "busy"
-        if now - self.user_last.get(user.lower(), 0) < USER_COOLDOWN:
-            return False, "cooldown"
+        left = USER_COOLDOWN - (now - self.user_last.get(user.lower(), 0))
+        if left > 0:
+            return False, "cooldown", int(left) + 1
         self.user_last[user.lower()] = now
         x0, y0, x1, y1 = self.area
         sp = self.sprites[pose]
