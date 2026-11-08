@@ -11,7 +11,7 @@ import random
 import threading
 import time
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 import json
 from pathlib import Path
@@ -28,11 +28,19 @@ DIM = (140, 165, 175)
 GREEN = (70, 220, 140)
 RED = (240, 90, 100)
 
-GAME_BOX = (0, 0, 960, 540)        # game video area
-SIDE_X = 960                        # right column
+# Layout v2 (1280x720): game in a framed "monitor" on the left, Hubie's cam + live clock + compact chat
+# on the right, a dashboard bar under the game, the red safety banner along the bottom.
+GAME_BOX = (16, 16, 928, 529)       # game video area (912x513, 16:9)
+GAME_W, GAME_H = GAME_BOX[2] - GAME_BOX[0], GAME_BOX[3] - GAME_BOX[1]
+SIDE_X = 944                        # right column
+CAM = (954, 16)                     # Hubie's 300x300 cam
+CLOCK_BOX = (944, 330, 1264, 386)
+CHAT_BOX = (944, 396, 1264, 646)
+HINT_BOX = (944, 654, 1264, 682)
+HUD_BOX = (16, 541, 928, 682)
 REACTIONS = os.environ.get("HUBIE_REACTIONS", "minimal")   # "minimal" = big moments only, "full" = all
-CAPTION_BOX = (0, 540, 960, 690)
-BANNER_Y = 690
+CAPTION_BOX = HUD_BOX
+BANNER_Y = 692
 
 
 def _font(size, bold=False):
@@ -70,8 +78,19 @@ class Scene:
         self.f_banner = _font(20, True)
         self.f_title = _font(22, True)
         self.f_tag = _font(14, True)
+        self.f_hud = _font(26, True)
+        self.f_chip_l = _font(12, True)
+        self.f_chip_v = _font(19, True)
+        self.f_chat_n = _font(15, True)
+        self.f_chat = _font(15)
+        self.f_clock = _font(22, True)
+        self.f_mini = _font(12, True)
+        self.started = time.time()
+        self._backdrop, self._backdrop_key = None, None
+        self._game_mask = Image.new("L", (GAME_W, GAME_H), 0)
+        ImageDraw.Draw(self._game_mask).rounded_rectangle((0, 0, GAME_W - 1, GAME_H - 1), 14, fill=255)
         self.game_jpeg = None
-        self.game_img = Image.new("RGB", (GAME_BOX[2], GAME_BOX[3]), PANEL)
+        self.game_img = Image.new("RGB", (GAME_W, GAME_H), PANEL)
         self.caption = "Hubie is waking up..."
         self.status = ""
         self.chat = [("Hubie", "Say hi in chat, I answer everyone by name.")]
@@ -80,7 +99,7 @@ class Scene:
         self.speech_env, self.speech_t0 = [], 0
         self.next_blink = time.time() + 3
         self.blink_until = 0
-        self.stats = {"rounds": 0, "hits": 0}
+        self.stats = {"rounds": 0, "hits": 0, "best": 0.0, "streak": 0}   # streak: +wins / -misses
         self.history = []          # recent (outcome, win) for the bottom strip
         self.poll = None           # (title, [(label, votes)], seconds_left) while a poll runs
         self._base = None
@@ -90,7 +109,7 @@ class Scene:
         self.pal = theme.palette(time.time())
         self.confetti = None
         from .popout import Popout
-        self.popout = Popout((0, 0, 960, 540))       # full-body Hubie for chat commands, over the game
+        self.popout = Popout(GAME_BOX)               # full-body Hubie for chat commands, over the game
         self.avatar = None
         try:
             from . import avatar
@@ -141,6 +160,13 @@ class Scene:
             self.mood_until = time.time() + 2.5
             self.stats["rounds"] += 1
             self.stats["hits"] += int(ev["win"])
+            if ev["win"]:
+                try:
+                    self.stats["best"] = max(self.stats["best"], float(ev.get("multiplier") or 0))
+                except (TypeError, ValueError):
+                    pass
+            st = self.stats["streak"]
+            self.stats["streak"] = (st + 1 if st > 0 else 1) if ev["win"] else (st - 1 if st < 0 else -1)
             shown = ev.get("outcome") if isinstance(ev.get("outcome"), (int, float)) else None
             if shown is None:
                 shown = f"{ev.get('multiplier') or 0}x"
@@ -153,7 +179,7 @@ class Scene:
 
     def reset_session(self):
         with self.lock:
-            self.stats = {"rounds": 0, "hits": 0}
+            self.stats = {"rounds": 0, "hits": 0, "best": 0.0, "streak": 0}   # streak: +wins / -misses
             self.history = []
             self._dirty = True
 
@@ -228,79 +254,152 @@ class Scene:
             self.speech_env, self.speech_t0 = env, time.time()
 
     # ---------- drawing ----------
+    # ---------- layout v2 ----------
+    def _run_start(self):
+        """When the current contest run started (Telegram /run timer), else when Hubie started."""
+        try:
+            from .config import ROOT
+            st = json.loads((ROOT / "run_state.json").read_text())
+            if st.get("run_started"):
+                return float(st["run_started"])
+        except Exception:
+            pass
+        return self.started
+
+    def _make_backdrop(self):
+        """Everything that only changes with the season / time of day: background, glows, glass panels,
+        the monitor bezel around the game and the safety banner. Built once per palette change."""
+        P = self.pal
+        BGc, PAN, ACC, ACC2, LINE = P["bg"], P["panel"], P["accent"], P["accent2"], P["line"]
+        img = Image.new("RGBA", (W, H), BGc + (255,))
+        d = ImageDraw.Draw(img)
+        top, bot = tuple(min(255, int(v * 1.6) + 6) for v in BGc), tuple(int(v * 0.55) for v in BGc)
+        for y in range(H):                                       # deep vertical gradient
+            k = y / H
+            d.line((0, y, W, y), fill=tuple(int(a + (b - a) * k) for a, b in zip(top, bot)) + (255,))
+        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))           # soft coloured light behind the monitor and cam
+        g = ImageDraw.Draw(glow)
+        g.ellipse((80, -60, 860, 600), fill=ACC + (60,))
+        g.ellipse((900, -40, 1320, 420), fill=ACC2 + (55,))
+        img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(90)))
+        self._theme.decorate(img, (0, 0, W, BANNER_Y), dict(P), seed=11, n=34)   # faint seasonal pattern
+        vig = Image.new("L", (W, H), 0)                          # vignette
+        ImageDraw.Draw(vig).rounded_rectangle((-40, -40, W + 40, H + 40), 220, fill=255)
+        vig = vig.filter(ImageFilter.GaussianBlur(120))
+        img = Image.composite(img, Image.new("RGBA", (W, H), (0, 0, 0, 255)), vig.point(lambda v: 90 + v * 165 // 255))
+        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        L = ImageDraw.Draw(layer)
+        glass = tuple(int(v * 0.8) for v in PAN) + (205,)
+        x0, y0, x1, y1 = GAME_BOX                                 # monitor bezel
+        L.rounded_rectangle((x0 - 10, y0 - 10, x1 + 9, y1 + 9), 22, fill=(18, 20, 28, 255))
+        L.rounded_rectangle((x0 - 10, y0 - 10, x1 + 9, y1 + 9), 22, outline=ACC + (200,), width=2)
+        L.rounded_rectangle((x0 - 4, y0 - 4, x1 + 3, y1 + 3), 17, outline=(255, 255, 255, 28), width=2)
+        L.line((x0 + 40, y0 - 10, x0 + 160, y0 - 10), fill=ACC + (255,), width=4)        # little highlight accents
+        L.line((x1 - 160, y1 + 9, x1 - 40, y1 + 9), fill=ACC2 + (255,), width=4)
+        for box in (HUD_BOX, CLOCK_BOX, CHAT_BOX, HINT_BOX):      # glass panels
+            L.rounded_rectangle(box, 16, fill=glass, outline=(255, 255, 255, 30), width=1)
+        L.rounded_rectangle((HUD_BOX[0], HUD_BOX[1], HUD_BOX[0] + 6, HUD_BOX[3]), 3, fill=ACC + (255,))
+        img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(1)) if False else layer)
+        d = ImageDraw.Draw(img)
+        # chat header + hint
+        d.text((CHAT_BOX[0] + 16, CHAT_BOX[1] + 10), "CHAT", font=self.f_chip_l, fill=ACC)
+        tag = P["name"].upper()
+        d.text((CHAT_BOX[2] - 16 - d.textlength(tag, font=self.f_chip_l), CHAT_BOX[1] + 10), tag, font=self.f_chip_l, fill=ACC2)
+        d.line((CHAT_BOX[0] + 16, CHAT_BOX[1] + 30, CHAT_BOX[2] - 16, CHAT_BOX[1] + 30), fill=LINE, width=1)
+        if P["key"] == "dec":
+            self._theme.string_lights(ImageDraw.Draw(img, "RGBA"), CHAT_BOX[0] + 6, CHAT_BOX[2] - 6, CHAT_BOX[1] - 6, n=10)
+            d = ImageDraw.Draw(img)
+        hint = "Type !commands to make Hubie move"
+        d.text(((HINT_BOX[0] + HINT_BOX[2] - d.textlength(hint, font=self.f_chip_l)) / 2, HINT_BOX[1] + 7), hint,
+               font=self.f_chip_l, fill=ACC2)
+        # clock card labels (the time itself is drawn every frame)
+        d.ellipse((CLOCK_BOX[0] + 16, CLOCK_BOX[1] + 13, CLOCK_BOX[0] + 26, CLOCK_BOX[1] + 23), fill=(240, 60, 70))
+        d.text((CLOCK_BOX[0] + 32, CLOCK_BOX[1] + 9), "ON AIR", font=self.f_chip_l, fill=(240, 90, 100))
+        lab = "AI-RUN · NO HUMAN INPUT"
+        d.text((CLOCK_BOX[2] - 16 - d.textlength(lab, font=self.f_chip_l), CLOCK_BOX[1] + 9), lab, font=self.f_chip_l, fill=ACC)
+        # safety banner, always red so it stands out in every theme
+        d.rectangle((0, BANNER_Y, W, H), fill=(150, 24, 38))
+        d.line((0, BANNER_Y, W, BANNER_Y), fill=(255, 120, 130), width=1)
+        msg = "18+ ONLY   •   DEMO PLAY, NO REAL MONEY   •   GAMBLE RESPONSIBLY   •   AI STREAM"
+        d.text(((W - d.textlength(msg, font=self.f_tag)) / 2, BANNER_Y + 6), msg, font=self.f_tag, fill=WHITE)
+        return img.convert("RGB")
+
     def _build_base(self):
         P = self.pal
-        BGc, PAN, ACC, ACC2, DIMc, LINE = P["bg"], P["panel"], P["accent"], P["accent2"], P["dim"], P["line"]
-        img = Image.new("RGB", (W, H), BGc)
-        img.paste(self.game_img, (0, 0))
-        # bottom strip: what's playing + recent results (no captions; Hubie's words are spoken only)
-        ImageDraw.Draw(img).rectangle(CAPTION_BOX, fill=PAN)
-        self._theme.decorate(img, CAPTION_BOX, P, seed=7, n=14)
+        if self._backdrop is None or self._backdrop_key != P["cache"]:
+            self._backdrop, self._backdrop_key = self._make_backdrop(), P["cache"]
+        ACC, ACC2, DIMc, LINE = P["accent"], P["accent2"], P["dim"], P["line"]
+        img = self._backdrop.copy()
+        img.paste(self.game_img, (GAME_BOX[0], GAME_BOX[1]), self._game_mask)
         d = ImageDraw.Draw(img)
-        d.line((0, CAPTION_BOX[1], CAPTION_BOX[2], CAPTION_BOX[1]), fill=ACC, width=3)
-        y0 = CAPTION_BOX[1]
+        # ---- dashboard bar under the game ----
+        x0, y0, x1, y1 = HUD_BOX
+        status = self.status or "Warming up"
+        game, _, strat = status.replace("Now playing: ", "").partition(" - ")
+        d.text((x0 + 22, y0 + 12), game.upper(), font=self.f_hud, fill=ACC)
+        if strat:
+            d.text((x0 + 26 + d.textlength(game.upper(), font=self.f_hud), y0 + 20), strat, font=self.f_chip_l, fill=DIMc)
         r, h = self.stats["rounds"], self.stats["hits"]
-        d.text((20, y0 + 16), self.status or "Warming up", font=self.f_title, fill=ACC)
-        d.text((20, y0 + 48), f"Rounds {r}    Hits {h}" + (f"    ({100 * h // r}%)" if r else ""),
-               font=self.f_small, fill=DIMc)
-        if not self.poll and self.popout.available():         # tell viewers they can make him move
-            hint = "Chat: type !commands to make Hubie move"
-            d.text((CAPTION_BOX[2] - 16 - d.textlength(hint, font=self.f_small), y0 + 22), hint,
-                   font=self.f_small, fill=P["accent2"])
-        d.text((20, y0 + 92), "Recent rolls", font=self.f_small, fill=DIMc)
-        x = 150
+        stk = self.stats["streak"]
+        chips = [("ROUNDS", f"{r:,}", WHITE), ("HIT RATE", f"{100 * h // r}%" if r else "-", WHITE),
+                 ("BEST", f"{self.stats['best']:.2f}x" if self.stats["best"] else "-", GREEN),
+                 ("STREAK", (f"W{stk}" if stk > 0 else f"L{-stk}") if stk else "-", GREEN if stk > 0 else RED)]
+        if not self.poll:
+            cx = x1 - 16
+            for label, val, col in reversed(chips):
+                w = max(d.textlength(val, font=self.f_chip_v), d.textlength(label, font=self.f_chip_l)) + 24
+                cx -= w
+                d.rounded_rectangle((cx, y0 + 10, cx + w - 8, y0 + 56), 10, fill=(0, 0, 0), outline=LINE)
+                d.text((cx + 8, y0 + 13), label, font=self.f_chip_l, fill=DIMc)
+                d.text((cx + 8, y0 + 29), val, font=self.f_chip_v, fill=col)
+                cx -= 2
+        d.text((x0 + 22, y0 + 82), "RECENT", font=self.f_chip_l, fill=DIMc)
+        x = x0 + 86
         for outcome, win in reversed(self.history):
             label = f"{outcome:.2f}" if isinstance(outcome, (int, float)) else str(outcome)
-            w = d.textlength(label, font=self.f_small_b) + 22
-            if x + w > (548 if self.poll else CAPTION_BOX[2] - 16):
+            w = d.textlength(label, font=self.f_chip_l) + 20
+            if x + w > (x0 + 500 if self.poll else x1 - 16):
                 break
-            d.rounded_rectangle((x, y0 + 86, x + w, y0 + 118), 14, fill=GREEN if win else RED)
-            d.text((x + 11, y0 + 91), label, font=self.f_small_b, fill=(10, 20, 25))
-            x += w + 8
-        # poll box over the right side of the bottom strip
-        if self.poll:
+            d.rounded_rectangle((x, y0 + 76, x + w, y0 + 102), 13, fill=GREEN if win else RED)
+            d.text((x + 10, y0 + 82), label, font=self.f_chip_l, fill=(10, 20, 25))
+            x += w + 6
+        if self.poll:                                            # poll takes the right half of the bar
             title, opts, left = self.poll
-            px = 560
-            box = tuple(min(255, int(v * 1.35) + 6) for v in PAN)
-            d.rounded_rectangle((px, y0 + 10, CAPTION_BOX[2] - 12, y0 + 140), 12, fill=box, outline=ACC, width=2)
-            d.text((px + 14, y0 + 16), f"{title}  ·  {left}s", font=self.f_small_b, fill=ACC)
+            px = x0 + 520
+            d.rounded_rectangle((px, y0 + 8, x1 - 10, y1 - 8), 12, fill=(0, 0, 0), outline=ACC, width=2)
+            d.text((px + 12, y0 + 14), f"{title}  ·  {left}s", font=self.f_chip_l, fill=ACC)
             total = max(1, sum(v for _, v in opts))
-            for i, (label, v) in enumerate(opts):
-                yy = y0 + 44 + i * 30
-                d.text((px + 14, yy), f"{i + 1}", font=self.f_small_b, fill=WHITE)
-                bw = int((CAPTION_BOX[2] - px - 200) * v / total)
-                d.rounded_rectangle((px + 36, yy + 2, px + 36 + max(6, bw), yy + 22), 8, fill=ACC if v else LINE)
-                d.text((px + 44 + max(6, bw), yy), f"{label}  {v}", font=self.f_small, fill=WHITE)
-        # right column: title + chat
-        d.rectangle((SIDE_X, 0, W, BANNER_Y), fill=PAN)
-        self._theme.decorate(img, (SIDE_X, 330, W, BANNER_Y), P, seed=3, n=12)
-        d = ImageDraw.Draw(img)
-        d.line((SIDE_X, 0, SIDE_X, BANNER_Y), fill=ACC, width=3)
-        d.text((SIDE_X + 16, 332), "HUBIE  LIVE 24/7", font=self.f_title, fill=ACC)
-        tag = P["name"].upper()
-        d.text((W - 14 - d.textlength(tag, font=self.f_tag), 339), tag, font=self.f_tag, fill=ACC2)
-        if P["key"] == "dec":
-            self._theme.string_lights(ImageDraw.Draw(img, "RGBA"), SIDE_X + 8, W - 8, 360)
-            d = ImageDraw.Draw(img)
-        else:
-            d.line((SIDE_X + 16, 366, W - 16, 366), fill=LINE, width=2)
-        y = 384 if P["key"] == "dec" else 376
-        for user, text in self.chat[-8:]:
-            d.text((SIDE_X + 16, y), user, font=self.f_small_b,
-                   fill=ACC2 if user == "HubieBot" else ACC)
-            for ln in _wrap(d, text, self.f_small, 285)[:2]:
-                y += 21
-                d.text((SIDE_X + 16, y), ln, font=self.f_small, fill=WHITE)
-            y += 26
-            if y > BANNER_Y - 30:
-                break
-        # safety banner: always on screen and always red, so it stands out in every theme
-        d.rectangle((0, BANNER_Y, W, H), fill=(170, 30, 45))
-        d.line((0, BANNER_Y, W, BANNER_Y), fill=ACC, width=2)
-        msg = "18+ ONLY   |   DEMO PLAY, NO REAL MONEY   |   GAMBLE RESPONSIBLY   |   AI STREAM"
-        tw = d.textlength(msg, font=self.f_banner)
-        d.text(((W - tw) / 2, BANNER_Y + 4), msg, font=self.f_banner, fill=WHITE)
+            for i, (label, v) in enumerate(opts[:3]):
+                yy = y0 + 36 + i * 30
+                d.text((px + 12, yy), f"{i + 1}", font=self.f_chat_n, fill=WHITE)
+                bw = int((x1 - px - 190) * v / total)
+                d.rounded_rectangle((px + 32, yy + 2, px + 32 + max(6, bw), yy + 20), 8, fill=ACC if v else LINE)
+                d.text((px + 40 + max(6, bw), yy), f"{label}  {v}", font=self.f_chat, fill=WHITE)
+        # ---- compact chat ----
+        cx0, cy0, cx1, cy1 = CHAT_BOX
+        rows = []
+        for user, text in reversed(self.chat[-6:]):
+            lines = _wrap(d, text, self.f_chat, cx1 - cx0 - 32)[:2]
+            rows.insert(0, (user, lines))
+        y = cy0 + 40
+        need = sum(19 * (1 + len(l)) + 6 for _, l in rows)
+        while rows and need > cy1 - cy0 - 48:                    # keep only what fits, newest at the bottom
+            u, l = rows.pop(0)
+            need -= 19 * (1 + len(l)) + 6
+        for user, lines in rows:
+            d.text((cx0 + 16, y), user, font=self.f_chat_n, fill=ACC2 if user == "HubieBot" else ACC)
+            for ln in lines:
+                y += 19
+                d.text((cx0 + 16, y), ln, font=self.f_chat, fill=WHITE)
+            y += 25
         return img
+
+    def _draw_clock(self, img, now):
+        secs = int(now - self._run_start())
+        hh, mm, ss = secs // 3600, secs % 3600 // 60, secs % 60
+        txt = f"{hh:02d}h {mm:02d}m {ss:02d}s"
+        d = ImageDraw.Draw(img)
+        d.text((CLOCK_BOX[0] + 16, CLOCK_BOX[1] + 25), txt, font=self.f_clock, fill=WHITE)
 
     def _mouth_level(self, now):
         from .audio import MIXER
@@ -325,10 +424,14 @@ class Scene:
         card = self.avatar.render(now, self._mouth_level(now))
         mood = self.mood if now < self.mood_until else "idle"
         glow = {"hit": GREEN, "miss": RED}.get(mood, self.pal["accent"])
-        x0, y0 = SIDE_X + (W - SIDE_X - card.width) // 2, 14
+        x0, y0 = CAM
         d = ImageDraw.Draw(img)
-        d.rounded_rectangle((x0 - 5, y0 - 5, x0 + card.width + 4, y0 + card.height + 4), 32, outline=glow, width=5)
+        d.rounded_rectangle((x0 - 4, y0 - 4, x0 + card.width + 3, y0 + card.height + 3), 30, outline=glow, width=4)
         img.paste(card, (x0, y0), card)
+        # name plate, webcam style
+        d.rounded_rectangle((x0 + 10, y0 + card.height - 40, x0 + 118, y0 + card.height - 12), 12, fill=(12, 14, 20))
+        d.ellipse((x0 + 20, y0 + card.height - 31, x0 + 30, y0 + card.height - 21), fill=(240, 60, 70))
+        d.text((x0 + 38, y0 + card.height - 37), "HUBIE", font=self.f_chip_v, fill=WHITE)
 
     def _draw_hubie_art(self, img, now):
         """Official Hubie art, with a moving mouth and blinking eyes drawn on top."""
@@ -405,7 +508,7 @@ class Scene:
             if self.game_jpeg is not None:
                 try:
                     g = Image.open(io.BytesIO(self.game_jpeg)).convert("RGB")
-                    self.game_img = g.resize((GAME_BOX[2], GAME_BOX[3]), Image.BILINEAR)
+                    self.game_img = g.resize((GAME_W, GAME_H), Image.BILINEAR)
                 except Exception:
                     pass
                 self.game_jpeg, self._dirty = None, True
@@ -415,6 +518,7 @@ class Scene:
             if self._dirty or self._base is None:
                 self._base, self._dirty = self._build_base(), False
             frame = self._base.copy()
+            self._draw_clock(frame, now)
             self.draw_hubie(frame, now)
             self.popout.draw(frame, now)
             if self.confetti:
