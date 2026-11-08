@@ -124,7 +124,7 @@ no floor, no text, no new objects. Smooth, loopable cartoon motion that ends clo
 ANIM_FPS = 12
 
 
-def animate(name, motion, secs):
+def animate(name, motion, secs, reuse=False):
     key = os.environ.get("XAI_API_KEY")
     if not key:
         sys.exit("XAI_API_KEY is missing: add it to /opt/hubie/.env")
@@ -141,6 +141,9 @@ def animate(name, motion, secs):
     canvas.convert("RGB").save(buf, "PNG")
     uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
     H = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    mp4 = OUT / f"{name}_anim.mp4"
+    if reuse and mp4.exists():                       # re-cut the video we already have (no new API call)
+        return cut_frames(name, im, mp4)
     r = httpx.post(VIDEO_API + "/generations", headers=H, timeout=60,
                    json={"model": VIDEO_MODEL, "prompt": VIDEO_PROMPT.format(motion=motion), "image": {"url": uri},
                          "duration": secs, "resolution": "480p", "aspect_ratio": "3:4"})
@@ -160,8 +163,12 @@ def animate(name, motion, secs):
     if not j.get("video", {}).get("respect_moderation", True):
         sys.exit("xAI moderation flagged the video, not using it")
     OUT.mkdir(parents=True, exist_ok=True)
-    mp4 = OUT / f"{name}_anim.mp4"
     mp4.write_bytes(httpx.get(j["video"]["url"], timeout=120).content)
+    cut_frames(name, im, mp4)
+
+
+def cut_frames(name, im, mp4):
+    """Video -> cut-out frames in art/hubie/body/<name>/ plus a preview strip."""
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(mp4), "-vf", f"fps={ANIM_FPS}",
                         f"{tmp}/f_%03d.png"], check=True)
@@ -219,9 +226,10 @@ if __name__ == "__main__":
     c.add_argument("name")
     c.add_argument("motion")
     c.add_argument("--secs", type=int, default=3)
+    c.add_argument("--reuse", action="store_true", help="re-cut the last video instead of making a new one")
     args = ap.parse_args()
     if args.cmd == "animate":
-        animate(args.name, args.motion, args.secs)
+        animate(args.name, args.motion, args.secs, args.reuse)
     elif args.cmd == "new":
         generate(args.name, args.pose, args.n)
     else:

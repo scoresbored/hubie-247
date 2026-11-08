@@ -17,7 +17,8 @@ def cutout(img):
     spill = g - np.maximum(r, b)
     # screen green: strongly green and "neutral" (blue about as strong as red). Leaves and other props he
     # holds are yellow-green (much more red than blue), so they never count as screen.
-    screen = (spill > 45) & (b >= 0.7 * r)
+    # (video renders come out as a very bright, almost blue-free green like (12, 250, 4): that counts too)
+    screen = (spill > 45) & ((b >= 0.7 * r) | ((g > 180) & (r < 70)))
     lab, _ = ndimage.label(screen)
     edge_labels = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))) - {0}
     bg = np.isin(lab, list(edge_labels))
