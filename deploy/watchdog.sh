@@ -5,7 +5,10 @@
 HB=/opt/hubie/logs/heartbeat
 LOG=/opt/hubie/logs/watchdog.log
 now=$(date +%s)
-last=$(cat "$HB" 2>/dev/null || echo 0)
+# No heartbeat file yet (fresh install, or Hubie still starting up): nothing to judge, never restart on that.
+[ -s "$HB" ] || exit 0
+last=$(cat "$HB" 2>/dev/null)
+case "$last" in ''|*[!0-9]*) exit 0 ;; esac
 # Only act if Hubie is supposed to be running (its tmux session exists)
 if sudo -u hubie tmux has-session -t =hubie 2>/dev/null; then
   if [ $((now - last)) -gt 600 ]; then
