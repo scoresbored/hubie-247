@@ -18,7 +18,7 @@ def match_game(text):
     t = text.lower()
     for name, key in sorted(ALIASES.items(), key=lambda kv: -len(kv[0])):
         if name in t:
-            return key
+            return key if key in GAMES else None
     return None
 
 

@@ -83,8 +83,21 @@ stream key and a Kick developer app, an Anthropic API key, and a Housebets accou
 - **Game control:** Playwright + Chromium on Xvfb; results from the site's own bet API reply
 - **Streaming:** ffmpeg (libx264 + AAC) over RTMPS to Kick; voice mixed in-process, one audio chunk per video frame (no A/V drift)
 - **Chat:** Kick pop-out chat feed (read) + official Kick public API (send, timeouts), httpx
+- **Pose and animation generation:** xAI Grok Imagine (image editing with reference images, image-to-video)
 - **Hosting:** Hetzner Cloud CPX32, Ubuntu 24.04
 - No templates or starter kits were used.
+
+## Making new moves with Grok (tools/grok_pose.py)
+
+New pop-out moves are generated with xAI's Grok Imagine API, using Hubie's existing poses as the character
+reference, then cut out of the green screen and sized automatically:
+
+    python tools/grok_pose.py new moonwalk "smooth moonwalk, one foot sliding back"   # 3 versions + preview sheet
+    python tools/grok_pose.py install moonwalk 2 "{u} asked for a moonwalk"         # becomes !moonwalk
+    python tools/grok_pose.py animate dance "bouncy dance, stepping side to side"    # still pose -> animated frames
+
+`animate` turns a still move into a short Grok video, cuts every frame out and the pop-out plays it as a looping
+animation. Needs `XAI_API_KEY` in `.env`; a pose costs a few cents.
 
 ## Future upgrades: better animation and voice
 

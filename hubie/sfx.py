@@ -215,6 +215,8 @@ class SFX:
     def play(self, name):
         from .audio import MIXER
         clip = self.clips.get(name)
+        if clip is None and name.startswith("pop:"):      # a newly added move: sparkle sound until it gets its own
+            clip = self.clips.get("pop:dapper")
         if clip is not None:
             MIXER.add_sfx(clip)
 

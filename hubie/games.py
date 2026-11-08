@@ -31,6 +31,13 @@ GAMES = {
     "coinflip": {"name": "Coinflip", "url": BASE + "coin-flip", "strategies": [{"name": "classic"}]},
 }
 
+# Games taken out of the rotation (comma-separated keys). Max Win is off by default: its animations are
+# heavy enough to eat most of the server's CPU in the headless browser.
+import os as _os
+DISABLED = [k.strip() for k in _os.environ.get("HUBIE_DISABLED_GAMES", "maxwin").split(",") if k.strip()]
+for _k in DISABLED:
+    GAMES.pop(_k, None)
+
 
 async def _fill(page, selector, value):
     box = page.locator(f"{HOST} {selector}").first

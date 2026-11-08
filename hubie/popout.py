@@ -38,6 +38,7 @@ HEIGHT = 330           # on-screen height of the full-body Hubie (game area is 5
 ENTER, EXIT = 0.45, 0.35
 HOLD = 4.2             # seconds he stays up
 GAP = 6.0              # quiet seconds between pop-outs
+ANIM_FPS = 12          # playback speed of animated moves
 USER_COOLDOWN = 60.0   # per viewer
 
 
@@ -60,11 +61,27 @@ class Popout:
     def __init__(self, area=(0, 0, 960, 540)):
         self.area = area
         self.sprites = {}
+        extra = ART / "commands.json"                 # moves added later with tools/grok_pose.py
+        if extra.exists():
+            try:
+                import json
+                for name, c in json.loads(extra.read_text()).items():
+                    if name.isalpha() and name.lower() not in COMMANDS:
+                        COMMANDS[name.lower()] = (c["pose"], c.get("caption", "{u} asked for this one"),
+                                                  c.get("mood", "happy"), bool(c.get("confetti")))
+            except Exception:
+                pass
         for f in sorted(ART.glob("*.png")):           # saved at stream size by tools/cutout_body.py
             im = Image.open(f).convert("RGBA")
             if im.height > HEIGHT * 1.3:              # a raw, unscaled render: fit it to the usual height
                 im = im.resize((round(im.width * HEIGHT / im.height), HEIGHT), Image.LANCZOS)
             self.sprites[f.stem] = im
+        self.anims = {}                               # pose -> animation frames (tools/grok_pose.py animate)
+        for d in sorted(p for p in ART.iterdir() if p.is_dir()) if ART.exists() else []:
+            frames = [Image.open(f).convert("RGBA") for f in sorted(d.glob("frame_*.png"))]
+            if len(frames) >= 4:
+                self.anims[d.name] = frames
+                self.sprites.setdefault(d.name, frames[0])
         self.font = _font(20)
         self.active = None           # dict(pose, caption, t0, x, side)
         self.last_end = 0.0
@@ -120,8 +137,11 @@ class Popout:
         else:                                           # ducks back down
             e = (t - ENTER - HOLD) / EXIT
             k = 1 - e * e
-        bob = math.sin(t * 5.5) * 4 if ENTER <= t < ENTER + HOLD else 0
-        ang = math.sin(t * 2.6) * 3 if ENTER <= t < ENTER + HOLD else 0
+        anim = self.anims.get(a["pose"])
+        if anim and ENTER <= t < ENTER + HOLD:        # animated move: play its frames (12 fps, looping)
+            sp = anim[int((t - ENTER) * ANIM_FPS) % len(anim)]
+        bob = 0 if anim else (math.sin(t * 5.5) * 4 if ENTER <= t < ENTER + HOLD else 0)
+        ang = 0 if anim else (math.sin(t * 2.6) * 3 if ENTER <= t < ENTER + HOLD else 0)
         frame = sp.rotate(ang, resample=Image.BILINEAR, expand=True) if abs(ang) > 0.2 else sp
         y = y1 - round(frame.height * k) + bob
         x = a["x"] - (frame.width - sp.width) // 2
