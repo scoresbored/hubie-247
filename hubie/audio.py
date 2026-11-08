@@ -52,20 +52,46 @@ class Mixer:
         self.tpos = 0
         self.music_vol = float(os.environ.get("HUBIE_MUSIC_VOLUME", "0.12"))
         self.duck = 1.0           # drops while Hubie talks so his voice stays clear
+        self.duck_to = 0.35       # how far the music dips under his voice
         self.sfx = []             # playing sound effects: [samples (array 'h'), position]
 
-    def set_music(self, paths):
-        loaded = [_load_mono16(p) for p in paths]
+    def set_music(self, paths, songs=()):
+        """Background music. With songs, the playlist alternates: a song, then a lo-fi loop, then the next
+        song (shuffled, no repeats until all have played)... Every track is level-matched so nothing jumps."""
+        import numpy as np
+
+        def level(a, target=0.12):
+            if not len(a):
+                return a
+            x = np.frombuffer(a, dtype=np.int16).astype(np.float32)
+            rms = float(np.sqrt(np.mean(x[:: max(1, len(x) // 400000)] ** 2))) or 1.0
+            y = np.clip(x * (target * 32768 / rms), -32768, 32767).astype(np.int16)
+            return array.array("h", y.tobytes())
+
+        loops = [level(_load_mono16(p)) for p in paths]
+        tunes = [level(_load_mono16(p)) for p in songs]
         with self.lock:
-            self.tracks = [t for t in loaded if len(t)]
+            self.tracks = [t for t in loops if len(t)]
+            self.songs = [t for t in tunes if len(t)]
+            self.song_order, self.last_was_song = [], False
             self.track, self.tpos = None, 0
 
+    def _next_track(self):
+        songs = getattr(self, "songs", [])
+        if songs and (not self.last_was_song or not self.tracks):
+            if not self.song_order:
+                self.song_order = random.sample(range(len(songs)), len(songs))
+            self.last_was_song = True
+            return songs[self.song_order.pop()]
+        self.last_was_song = False
+        choices = [t for t in self.tracks if t is not self.track] or self.tracks
+        return random.choice(choices)
+
     def _music_chunk(self):
-        if not self.tracks or self.music_vol <= 0:
+        if not (self.tracks or getattr(self, "songs", [])) or self.music_vol <= 0:
             return None
         if self.track is None or self.tpos + PER_FRAME > len(self.track):
-            choices = [t for t in self.tracks if t is not self.track] or self.tracks
-            self.track, self.tpos = random.choice(choices), 0
+            self.track, self.tpos = self._next_track(), 0
         c = self.track[self.tpos:self.tpos + PER_FRAME]
         self.tpos += PER_FRAME
         return c
@@ -129,7 +155,7 @@ class Mixer:
             m = self._music_chunk()
             fx = self._sfx_chunk()
         if m is not None:
-            target = 0.35 if self.level > 0.02 else 1.0
+            target = self.duck_to if self.level > 0.02 else 1.0
             self.duck += (target - self.duck) * (0.35 if target < self.duck else 0.04)   # fast duck, slow return
             g = self.music_vol * self.duck
             chunk = array.array("h", (max(-32768, min(32767, v + int(mv * g))) for v, mv in zip(chunk, m)))

@@ -557,9 +557,18 @@ async def main(offline):
             await asyncio.sleep(15)
     try:
         from .audio import MIXER
-        from .music import ensure_tracks
-        MIXER.set_music(await asyncio.get_running_loop().run_in_executor(None, ensure_tracks))
-        log("music_ready", tracks=len(MIXER.tracks), volume=MIXER.music_vol)
+        from .music import ensure_tracks, song_tracks
+        loop = asyncio.get_running_loop()
+        songs = []
+        try:
+            songs = await loop.run_in_executor(None, song_tracks)      # Housebets songs as background music
+        except Exception as e:
+            log("songs_error", err=repr(e)[:200])
+        if songs:
+            MIXER.duck_to = 0.25                                       # songs have vocals: dip deeper under Hubie
+        lofi = await loop.run_in_executor(None, ensure_tracks)
+        await loop.run_in_executor(None, lambda: MIXER.set_music(lofi, songs))   # song, lo-fi, song, lo-fi...
+        log("music_ready", lofi=len(MIXER.tracks), songs=[p.stem for p in songs], volume=MIXER.music_vol)
     except Exception as e:
         log("music_error", err=repr(e)[:200])
     state = ChatState()

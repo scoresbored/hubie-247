@@ -86,3 +86,27 @@ def ensure_tracks():
                 w.writeframes(data.tobytes())
         paths.append(p)
     return paths
+
+
+SONG_DIR = Path(__file__).resolve().parent.parent / "art" / "music" / "songs"
+
+
+def song_tracks():
+    """The Housebets songs in art/music/songs/ as background music: each is decoded once with ffmpeg into
+    the stream's audio format (22.05 kHz mono WAV, loudness-normalised, 1.5 s fades) and cached.
+    Returns the WAV paths (empty if there are no songs, so the generated lo-fi loops are used instead)."""
+    import subprocess
+    from .config import ROOT
+    out_dir = ROOT / "cache" / "songs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for f in sorted(SONG_DIR.glob("*")) if SONG_DIR.exists() else []:
+        if f.suffix.lower() not in (".m4a", ".mp3", ".wav", ".ogg", ".flac", ".opus"):
+            continue
+        wav = out_dir / (f.stem + ".wav")
+        if not wav.exists() or wav.stat().st_mtime < f.stat().st_mtime:
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(f), "-af",
+                            "loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:d=1.5,areverse,afade=t=in:d=1.5,areverse",
+                            "-ac", "1", "-ar", "22050", "-sample_fmt", "s16", str(wav)], check=True)
+        paths.append(wav)
+    return paths
