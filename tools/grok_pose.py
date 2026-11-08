@@ -210,7 +210,9 @@ CAM_PROMPTS = {
     "idle": ("He is idle and relaxed, listening: mouth closed the whole time, slow breathing, a blink or two, a slow "
              "small head tilt, a glance to the side and back to the camera. He keeps his paws where they are."),
 }
-CAM_TAIL = (" Same character and art style, same head-and-shoulders framing and size, he stays in place. The camera "
+CAM_TAIL = (" His black top hat keeps exactly one crown and ONE brim, exactly as in the image, with the gold H badge; "
+            "it never doubles, stretches or changes shape. "
+            "Same character and art style, same head-and-shoulders framing and size, he stays in place. The camera "
             "does not move. The background stays plain solid pure green (#00FF00) the whole time. No text, no new "
             "objects. Smooth motion that ends close to how it started so it loops.")
 
