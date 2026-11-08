@@ -137,32 +137,47 @@ class Avatar:
                 opened = json.loads((d / "mouth.json").read_text())["open"][:len(frames)]
             except Exception:
                 opened = [0.5] * len(frames)
-            out.setdefault(pose, {})[mode] = (frames, opened)
+            import numpy as np
+            prints = [np.asarray(f.convert("LA").resize((24, 24)), dtype=np.float32) for f in frames]
+            out.setdefault(pose, {})[mode] = (frames, opened, prints)
         return {p: v for p, v in out.items() if "talk" in v and "idle" in v}
 
     def _cam_frame(self, now, speaking):
         """The cam video frame for this moment, or None if this pose has no video loops.
         Idle: the idle loop plays forward then backward (no seam). Talking: the talking loop keeps moving
         forward for natural head motion, but from the next few frames it shows the one whose mouth opening
-        best matches the voice right now, so the lips follow the words."""
+        best matches the voice right now, so the lips follow the words. Short pauses between words stay in
+        the talking loop (closed-mouth frames); after ~1s of silence it switches to idle. Loops are never
+        blended (two moving heads would ghost into a doubled hat): a switch jumps to the frame of the other
+        loop where his head is in nearly the same spot, so the cut doesn't show."""
         loops = self.cam.get(self.pose)
         if not loops:
             return None
         dt = min(0.1, max(0.0, now - self.cam_t)) if self.cam_t else 1 / 30
         self.cam_t = now
-        mode = "talk" if speaking else "idle"
-        frames, opened = loops[mode]
+        quiet_for = now - self.last_voice
+        mode = "talk" if (speaking or quiet_for < 1.0) else "idle"
+        if mode != self.cam_mode or self.pose != getattr(self, "cam_pose", None):
+            frames, opened, prints = loops[mode]
+            last = getattr(self, "cam_last_print", None)
+            if last is not None and self.pose == getattr(self, "cam_pose", None):
+                best = min(range(len(prints)), key=lambda i: float(abs(prints[i] - last).mean()))
+                self.cam_pos[mode] = float(best)
+            self.cam_mode, self.cam_pose = mode, self.pose
+        frames, opened, prints = loops[mode]
         n = len(frames)
         self.cam_pos[mode] += dt * 12
         if mode == "idle":
             p = int(self.cam_pos["idle"]) % (2 * n - 2)
-            return frames[p if p < n else 2 * n - 2 - p], mode
-        target = min(1.0, self.talk_level * 1.15)
-        if not getattr(self, "happy", False):
-            target = min(target, 0.75)                    # widest mouths are for happy lines
-        base = int(self.cam_pos["talk"])
-        best = min(range(base, base + 4), key=lambda i: abs(opened[i % n] - target) + 0.04 * (i - base))
-        return frames[best % n], mode
+            i = p if p < n else 2 * n - 2 - p
+        else:
+            target = 0.0 if not speaking else min(1.0, self.talk_level * 1.15)
+            if not getattr(self, "happy", False):
+                target = min(target, 0.75)                # widest mouths are for happy lines
+            base = int(self.cam_pos["talk"])
+            i = min(range(base, base + 4), key=lambda k: abs(opened[k % n] - target) + 0.04 * (k - base)) % n
+        self.cam_last_print = prints[i]
+        return frames[i], mode
 
     # ---------- control ----------
     def react(self, mood, secs=2.5, then=None, soft=False, now=0.0):
@@ -284,11 +299,7 @@ class Avatar:
         cam = self._cam_frame(now, speaking) if key in self.pose_of else None
         if cam is not None:                                # video loop instead of stills (own eyes, mouth, blinks)
             img, mode = cam
-            group = f"cam{self.pose}_{mode}"
-            if group != self.shown:
-                self.prev, self.fade_t0, self.shown = self._last, now, group
-            if self.prev is not None and now - self.fade_t0 < 0.2:
-                img = Image.blend(self.prev, img, (now - self.fade_t0) / 0.2)
+            self.shown = f"cam{self.pose}"                 # no blending between video loops (it ghosts)
             self._last = img
             return self._finish(img, now, key, motion)
         g = self.gaze
