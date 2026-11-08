@@ -214,8 +214,9 @@ class Moments:
         prev = self.streak
         self.streak = (self.streak + 1 if self.streak >= 0 else 1) if ev["win"] else (self.streak - 1 if self.streak <= 0 else -1)
         mult = ev.get("multiplier") or 0
-        chance = ev.get("win_chance") or 100
-        if ev["win"] and (mult >= 10 or chance < 10):
+        # only the payout decides a "big hit": games report win chance in different units
+        # (Coinflip says 0.5, Limbo says 0.99 for 1%), which made every coin flip look like a long shot
+        if ev["win"] and mult >= 10:
             return f"a big hit: {mult}x"
         if ev["win"] and prev <= -8:
             return f"finally a hit after {-prev} misses in a row"
