@@ -70,6 +70,11 @@ class Suggestions:
             self.reqs = [r for r in self.reqs if r[1].lower() != user.lower()] + [(time.time(), user, key)]
         return key or ""
 
+    def waiting(self, benched, current):
+        """True if chat has asked for a game other than the one being played (in the last 20 minutes)."""
+        now = time.time()
+        return any(now - t < 1200 and k != current and benched.get(k, 0) < now for t, _, k in self.reqs)
+
     def take(self, benched):
         """Most-requested game from the last 20 minutes, with who asked first."""
         now = time.time()

@@ -13,7 +13,7 @@ chats with viewers by name, moderates chat, and restarts himself when something 
 | On screen | Animated Hubie (14 expression frames: two talking poses, picked per line; smooth lip sync from his live voice with auto-gain and blended mouth shapes; eyes that watch the game and look at viewers when he talks; confetti on big hits and streaks, blinks, breathing and sway, in his box he just chats (no reaction faces; set HUBIE_REACTIONS=full to bring them back), while the full-body pop-out moves carry the big expressions; seasonal sky that follows UTC day and night), the live game, recent results, chat, and a permanent 18+ / demo / gamble-responsibly banner |
 | Plays | Rotates every 8-15 min between House originals and strategies: Dice (1.5x / 2x / 10x / 50x), Limbo (2x-100x targets), Wheel (low/medium/high risk), Max Win, Plinko, Coinflip |
 | Talks | Comments only on real moments (win streaks, long losing streaks, big hits, droughts ending, milestones), announces and recaps each segment, never leaves long dead air |
-| Chat | Reads Kick chat. Hubie speaks to first-time chatters and real questions; a separate 🤖 chat bot handles text replies, moderation notices and polls. Chat picks games with polls (vote 1-3) and `!play <game>` requests. Follows, subs and gifted subs get a bot post and a spoken thank-you. Replies scale with chat speed: a quiet chat gets answered (but not the same person every line); a busy chat gets newcomers, questions and "Hubie" mentions only, capped per minute, so it never looks spammy |
+| Chat | Reads Kick chat. Hubie speaks to first-time chatters and real questions; a separate 🤖 chat bot handles text replies and moderation notices. Chat picks the next game with `!play <game>`: the most-requested game comes up next, and a request cuts the current game short (after at least 3 minutes) so chat sees it happen. Follows, subs and gifted subs get a bot post and a spoken thank-you. Replies scale with chat speed: a quiet chat gets answered (but not the same person every line); a busy chat gets newcomers, questions and "Hubie" mentions only, capped per minute, so it never looks spammy |
 | Music | Original lo-fi background loops generated in code (no third-party tracks), low volume, ducks under Hubie's voice |
 | Pop-out moves | Viewers type `!dance`, `!wave`, `!flex`, `!nap`, `!hmm`, `!cheer`, `!snack`, `!lol`, `!dapper` (or `!commands` for the list) and a full-body Hubie springs up over the game to do the move, with a caption naming who asked and its own sound effect (a bloop as he pops up, then e.g. a dance groove, party horn, sad trombone, snores, munching). One at a time, short gap between moves, one per viewer per minute. New poses become new commands by adding an image to `art/hubie/body/` |
 | Moderates | Offensive, vulgar or rude messages are **deleted from Kick chat and the user is muted**, before they ever reach the screen, Hubie's brain or his voice. Two layers: instant word rules (slurs, threats, sexual content, swearing, insults, with leetspeak and stretched spellings), then an AI check (Claude) for disguised or rude messages the rules miss. Mutes escalate for repeat offenders (3x, then 24h). Offensive usernames are never shown or spoken. Also removes links, promo/referral spam, caps and repeat spam; answers "I'm under 18" with the 18+ rule |
@@ -44,7 +44,7 @@ theme.py  seasonal look for the whole overlay: Hubie's sky follows the UTC clock
 stream.py pipes frames + voice into ffmpeg -> Kick (auto-restarts)
 audio.py  mixer: exactly one frame of audio per video frame, music bed with ducking, drives the mouth
 music.py  generates original lo-fi background loops (numpy)
-chatfun.py chat polls + !play requests
+chatfun.py !play game requests (and optional polls)
 kick.py   Kick chat in (pop-out chat feed) and out (official Kick API), timeouts
 chatmod.py chat moderation rules
 main.py   the director: segments, moments, chat worker, no-dead-air, RG reminders
@@ -136,7 +136,7 @@ and `/giveaway 5 Shoutout from Hubie` runs a 5-minute giveaway where viewers typ
 random winner live, with his reactions and a spoken announcement.
 
 It is **switched off for the contest** (`HUBIE_HUMAN_CONTROLS=0`), because a live command is a human action and
-the contest is about running with no humans. With it off, Hubie still runs polls himself every other segment.
+the contest is about running with no humans. With it off, chat still steers the game with `!play <game>`.
 When switched on, every use is logged as a `human_touch` and the Telegram bot warns that it resets the run.
 Giveaway prizes are checked by the same safety filter and must be non-monetary: shoutouts, picking the next
 game, a gifted Kick sub. Anything mentioning cash, crypto, bonuses, codes or credits is refused.

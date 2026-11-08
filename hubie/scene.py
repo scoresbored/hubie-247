@@ -138,6 +138,7 @@ class Scene:
     def set_game_jpeg(self, data):
         with self.lock:
             self.game_jpeg = data
+            self.game_frames = getattr(self, "game_frames", 0) + 1
 
     def set_caption(self, text):
         with self.lock:
@@ -309,7 +310,7 @@ class Scene:
         if P["key"] == "dec":
             self._theme.string_lights(ImageDraw.Draw(img, "RGBA"), CHAT_BOX[0] + 6, CHAT_BOX[2] - 6, CHAT_BOX[1] - 6, n=10)
             d = ImageDraw.Draw(img)
-        hint = "Type !commands to make Hubie move"
+        hint = "!play <game> to pick  ·  !commands"
         d.text(((HINT_BOX[0] + HINT_BOX[2] - d.textlength(hint, font=self.f_chip_l)) / 2, HINT_BOX[1] + 7), hint,
                font=self.f_chip_l, fill=ACC2)
         # clock card labels (the time itself is drawn every frame)

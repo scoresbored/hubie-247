@@ -246,6 +246,11 @@ def react_to(scene, reason):
         scene.react("happy", 2.5)
 
 
+def GAMES_KEYS():
+    from .games import GAMES
+    return list(GAMES)
+
+
 def pick_segment(benched, recent):
     from .games import GAMES
     now = time.time()
@@ -297,15 +302,13 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None
         label = strat["name"] + (f" ({note})" if note else "")
         line = safety.clean(await brain.segment(game.name, label, "start"))
         await speak(line or f"Switching it up. {game.name}, {strat['name']}. Let's see what happens.")
-        if seg_no % 2 == 0 and kick:                     # every other segment, let chat pick what's next
-
-            async def later_poll(k=key):
-                await asyncio.sleep(180)
-                await run_poll(scene, voice, brain, kick, state, benched, k)
-            asyncio.create_task(later_poll())
-        seg_end = time.time() + random.uniform(8, 15) * 60      # 8-15 minutes per segment
+        seg_start = time.time()
+        seg_end = seg_start + random.uniform(8, 15) * 60        # 8-15 minutes per segment
         fails = 0
         while time.time() < seg_end:
+            if time.time() - seg_start > 180 and state.suggestions.waiting(benched, key):
+                log("segment_cut", reason="chat requested a game")
+                break                                          # chat asked for a game: switch now
             try:
                 ev = await game.play_round()
                 fails = 0
@@ -413,14 +416,18 @@ async def human_inbox(scene, voice, brain, kick, state):
                                                  cmd.get("prize", ""), float(cmd.get("minutes", 3))))
 
 
-async def sync_check(streamer, every=300):
+async def sync_check(streamer, every=300, scene=None):
     """Every 5 minutes: make sure voice and picture are still together, and fix it if not."""
     from .audio import MIXER
     while True:
         await asyncio.sleep(every)
         backlog, lag = MIXER.backlog(), getattr(streamer, "lag", 0.0)
+        game_fps = None
+        if scene is not None:
+            n, scene.game_frames = getattr(scene, "game_frames", 0), 0
+            game_fps = round(n / every, 1)
         log("sync_check", audio_backlog_s=round(backlog, 2), video_lag_s=round(lag, 2),
-            waiting_lines=len(SPEECH._waiters or []))
+            waiting_lines=len(SPEECH._waiters or []), game_fps=game_fps)
         if backlog > 15:                          # nothing Hubie says is that long: something piled up
             MIXER.skip(int((backlog - 1) * 30))
             log("resync", dropped_audio_s=round(backlog - 1, 1))
@@ -445,7 +452,7 @@ async def main(offline):
     game = GameDriver(GAME_URL, scene.set_game_jpeg)
     voice, brain = Voice(), Brain()
     streamer = Streamer(scene, offline=offline)
-    tasks = [asyncio.create_task(streamer.run()), asyncio.create_task(sync_check(streamer))]
+    tasks = [asyncio.create_task(streamer.run()), asyncio.create_task(sync_check(streamer, scene=scene))]
     tasks.append(asyncio.create_task(previewer(scene, every=10 if offline else 30)))
     while True:
         try:
@@ -502,8 +509,11 @@ async def main(offline):
                 if got is not None:                                   # !play <game>
                     from .games import GAMES
                     names = ", ".join(g["name"] for g in GAMES.values())
-                    await kick.bot(f"@{user} got it, {GAMES[got]['name']} is on Hubie's request list." if got
-                                   else f"@{user} try !play followed by one of: {names}")
+                    if got and got == state.current:
+                        await kick.bot(f"@{user} we're already on {GAMES[got]['name']}, pick another one: {names}")
+                    else:
+                        await kick.bot(f"@{user} got it, {GAMES[got]['name']} is up next (switching within a few minutes)."
+                                       if got else f"@{user} try !play followed by one of: {names}")
                     return
                 await chat_q.put((user, text, time.time()))
 
@@ -522,7 +532,8 @@ async def main(offline):
                         if now - state.help_said > 90:
                             state.help_said = now
                             moves = " ".join("!" + c for c in scene.popout.available())
-                            await kick.bot(f"Make Hubie move: {moves} (one every few seconds, 1 per minute each)")
+                            games = "/".join(sorted(GAMES_KEYS()))
+                            await kick.bot(f"Make Hubie move: {moves} (1 per minute each) | Pick the next game: !play {games}")
                         return
                     ok = scene.pop(cmd, user)
                     log("popout", user=user, cmd=cmd, ok=ok[0], why=None if ok[0] else ok[1])
