@@ -20,6 +20,13 @@ chats with viewers by name, moderates chat, and restarts himself when something 
 | Stays safe | Every line passes a filter that blocks win promises, deposit/bonus/code talk and money amounts; every bet is checked to be $0 before the click and again in the site's reply |
 | Runs itself | Restarts crashed parts on its own: the stream (ffmpeg), the game browser, the chat reader, the whole app; benches a game for an hour if it keeps failing |
 
+## Personality
+
+Hubie's voice is modelled on how he actually posts as @HousebetsHubie on X: deadpan, all lowercase, unbothered,
+laziness as a flex, dry questions that roast gambler logic, honest about RTP and randomness, precise numbers as
+punchlines, scammers ignored until they get bored, and the occasional affectionate dig at Porchy, the founder
+(never about money, payments or bonuses). Every line is freshly written by the model under hard safety rules.
+
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for the agent and tool diagram.

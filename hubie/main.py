@@ -22,9 +22,12 @@ from .scene import Scene
 from .stream import Streamer
 from .voice import Voice
 
-BANTER = ["why sloths make great dice players", "the 3am crowd", "what Hubie does between rolls",
-          "the perfect nap schedule", "top hats as a lifestyle", "the calm of demo mode",
-          "favorite House originals", "chilling with chat"]
+BANTER = ["the hammock as a lifestyle", "chat trying to con you", "people who think a game is due",
+          "rtp as the price of a hobby", "not moving since round one", "the 3am crowd", "demo mode as inner peace",
+          "setting a realistic limbo target", "the top hat staying on through everything", "what counts as effort",
+          "being on stream 24/7 without getting up", "favorite house originals and why", "quiet rooms after big hits",
+          "porchy, the founder, and his work ethic versus yours", "porchy shipping yet another new game",
+          "whether porchy is watching the stream right now"]
 
 
 SPEECH = asyncio.Lock()
