@@ -14,6 +14,11 @@
          writes art/hubie/body/dance/frame_000.png ...; the pop-out then plays the frames instead of the still.
          A preview strip is written to /opt/hubie/poses/dance_anim_preview.png. Delete the folder to go back.
 
+  python tools/grok_pose.py cam talk B      (or: cam idle A, ...)
+      -> a short Grok video of Hubie's head-and-shoulders cam pose (A = smug, B = wide-eyed) talking or idling,
+         keyed off the green screen into full 512x512 frames: art/hubie/cam/<A|B>_<talk|idle>/frame_000.png ...
+         plus mouth.json (how open the mouth is in every frame) so his cam can lip-sync to the real voice.
+
 Needs XAI_API_KEY in /opt/hubie/.env. Each version costs a few cents. Nothing here touches the live stream.
 """
 import argparse
@@ -196,6 +201,102 @@ def cut_frames(name, im, mp4):
     print(f"{len(frames)} frames -> {folder}  (preview: {OUT / (name + '_anim_preview.png')}). Restart Hubie to load.")
 
 
+CAM_DIR = APP / "art" / "hubie" / "cam"
+CAM_SRC = {"A": "idle", "B": "idle2"}
+CAM_PROMPTS = {
+    "talk": ("He is talking to the camera like a relaxed, friendly streamer: his mouth opens and closes naturally "
+             "as if speaking in full sentences, small head nods and tilts, an occasional blink, slight shoulder "
+             "movement. He keeps his paws where they are."),
+    "idle": ("He is idle and relaxed, listening: mouth closed the whole time, slow breathing, a blink or two, a slow "
+             "small head tilt, a glance to the side and back to the camera. He keeps his paws where they are."),
+}
+CAM_TAIL = (" Same character and art style, same head-and-shoulders framing and size, he stays in place. The camera "
+            "does not move. The background stays plain solid pure green (#00FF00) the whole time. No text, no new "
+            "objects. Smooth motion that ends close to how it started so it loops.")
+
+
+def key_full(img):
+    """Green-screen key WITHOUT cropping (cam frames must keep the exact framing)."""
+    import numpy as np
+    from scipy import ndimage
+    a = np.asarray(img.convert("RGB")).astype(np.float32)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    spill = g - np.maximum(r, b)
+    screen = (spill > 45) & ((b >= 0.7 * r) | ((g > 180) & (r < 70)))
+    lab, _ = ndimage.label(screen)
+    edge = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))) - {0}
+    bg = np.isin(lab, list(edge))
+    band = ndimage.binary_dilation(bg, iterations=3) & ~bg
+    alpha = np.ones(bg.shape, np.float32)
+    alpha[bg] = 0
+    alpha[band] = np.clip(1 - (spill[band] - 25) / 70, 0, 1)
+    g2 = np.where(band | bg, np.minimum(g, np.maximum(r, b) + 12), g)
+    return Image.fromarray(np.dstack([r, g2, b, alpha * 255]).clip(0, 255).astype("uint8"), "RGBA")
+
+
+def mouth_open(frame, box):
+    """0..1-ish score of how open the mouth is: dark/red mouth-interior pixels inside the mouth box."""
+    import numpy as np
+    a = np.asarray(frame.crop(box).convert("RGBA")).astype(np.float32)
+    r, g, b, al = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
+    lum = (r + g + b) / 3
+    inside = (al > 128) & (((lum < 75) & (r >= b)) | ((r > 150) & (g < 120) & (b < 130)))   # dark mouth or tongue
+    return float(inside.mean())
+
+
+def cam(mode, pose, secs):
+    key = os.environ.get("XAI_API_KEY")
+    if not key:
+        sys.exit("XAI_API_KEY is missing: add it to /opt/hubie/.env")
+    src = Image.open(APP / "art" / "hubie" / f"{CAM_SRC[pose]}.png").convert("RGBA").resize((720, 720), Image.LANCZOS)
+    canvas = Image.new("RGBA", (720, 720), (0, 255, 0, 255))
+    canvas.alpha_composite(src)
+    buf = io.BytesIO()
+    canvas.convert("RGB").save(buf, "PNG")
+    uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    H = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    r = httpx.post(VIDEO_API + "/generations", headers=H, timeout=60,
+                   json={"model": VIDEO_MODEL, "prompt": CAM_PROMPTS[mode] + CAM_TAIL, "image": {"url": uri},
+                         "duration": secs, "resolution": "720p", "aspect_ratio": "1:1"})
+    if r.status_code != 200:
+        sys.exit(f"xAI error {r.status_code}: {r.text[:400]}")
+    rid = r.json()["request_id"]
+    print(f"cam {pose}_{mode}: video requested ({rid}), waiting...", flush=True)
+    for _ in range(150):
+        time.sleep(5)
+        j = httpx.get(f"{VIDEO_API}/{rid}", headers=H, timeout=30).json()
+        if j.get("status") in ("done", "failed"):
+            break
+    if j.get("status") != "done" or not j.get("video", {}).get("respect_moderation", True):
+        sys.exit(f"video not usable: {j.get('status')}")
+    OUT.mkdir(parents=True, exist_ok=True)
+    mp4 = OUT / f"cam_{pose}_{mode}.mp4"
+    mp4.write_bytes(httpx.get(j["video"]["url"], timeout=120).content)
+    cut_cam(pose, mode, mp4)
+
+
+def cut_cam(pose, mode, mp4):
+    folder = CAM_DIR / f"{pose}_{mode}"
+    if folder.exists():
+        for old in folder.glob("frame_*.png"):
+            old.unlink()
+    folder.mkdir(parents=True, exist_ok=True)
+    mbox = {"A": (150, 260, 380, 380), "B": (150, 250, 400, 400)}[pose]      # generous mouth area (512px frame)
+    scores = []
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(mp4), "-vf", f"fps={ANIM_FPS},scale=512:512",
+                        f"{tmp}/f_%03d.png"], check=True)
+        for i, f in enumerate(sorted(Path(tmp).glob("f_*.png"))):
+            fr = key_full(Image.open(f))
+            scores.append(mouth_open(fr, mbox))
+            fr.quantize(colors=256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE).save(
+                folder / f"frame_{i:03d}.png", optimize=True)
+    lo, hi = min(scores), max(scores)
+    norm = [round((s - lo) / (hi - lo), 3) if hi > lo else 0.0 for s in scores]
+    (folder / "mouth.json").write_text(json.dumps({"fps": ANIM_FPS, "open": norm}))
+    print(f"{len(norm)} frames -> {folder}; mouth openness range {lo:.3f}..{hi:.3f}", flush=True)
+
+
 def install(name, version, caption, mood, confetti):
     src = OUT / f"{name}_{version}.png"
     if not src.exists():
@@ -227,7 +328,16 @@ if __name__ == "__main__":
     c.add_argument("motion")
     c.add_argument("--secs", type=int, default=3)
     c.add_argument("--reuse", action="store_true", help="re-cut the last video instead of making a new one")
+    d = sub.add_parser("cam")
+    d.add_argument("mode", choices=["talk", "idle"])
+    d.add_argument("pose", choices=["A", "B"])
+    d.add_argument("--secs", type=int, default=6)
+    d.add_argument("--reuse", action="store_true")
     args = ap.parse_args()
+    if args.cmd == "cam":
+        mp4 = OUT / f"cam_{args.pose}_{args.mode}.mp4"
+        cut_cam(args.pose, args.mode, mp4) if args.reuse and mp4.exists() else cam(args.mode, args.pose, args.secs)
+        sys.exit(0)
     if args.cmd == "animate":
         animate(args.name, args.motion, args.secs, args.reuse)
     elif args.cmd == "new":
