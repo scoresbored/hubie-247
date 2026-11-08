@@ -87,6 +87,20 @@ stream key and a Kick developer app, an Anthropic API key, and a Housebets accou
 - **Hosting:** Hetzner Cloud CPX32, Ubuntu 24.04
 - No templates or starter kits were used.
 
+## Self-maintenance (a week with nobody touching it)
+
+- **Inside Hubie, every 10 minutes (janitor):** if Chrome's memory grows past 2.5 GB, the browser has run 12 hours,
+  or no round has played for 10 minutes, Hubie restarts the browser between games and clears its disk caches
+  (login cookies kept). If disk space drops below 3 GB, old logs and caches are deleted. The log file rotates at
+  40 MB (3 compressed copies kept).
+- **Every 5 minutes:** voice/picture sync check (drops piled-up audio if needed) and a game frame-rate reading.
+- **Heartbeat + watchdog:** Hubie writes `logs/heartbeat` every 30s; `deploy/watchdog.sh` (cron, every 5 minutes)
+  restarts the app if the heartbeat is older than 10 minutes, i.e. it froze without crashing. `run.sh` already
+  restarts it if it ever exits.
+- **Daily cleanup** (`deploy/daily_cleanup.sh`): system journal capped at 200 MB, package cache and old temp files cleared.
+
+Install the cron jobs once: `sudo cp deploy/hubie.cron /etc/cron.d/hubie`.
+
 ## Making new moves with Grok (tools/grok_pose.py)
 
 New pop-out moves are generated with xAI's Grok Imagine API, using Hubie's existing poses as the character

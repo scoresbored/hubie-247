@@ -1,0 +1,3 @@
+# /etc/cron.d/hubie : self-maintenance for the 24/7 stream
+*/5 * * * * root /opt/hubie/app/deploy/watchdog.sh
+17 4 * * * root /opt/hubie/app/deploy/daily_cleanup.sh

@@ -158,6 +158,9 @@ class ChatState:
         self.help_said = 0.0
         self.giveaway = None
         self.benched, self.current = {}, None
+        self.refresh_browser = None         # set by the janitor: reason to restart the browser between games
+        self.last_round = time.time()
+        self.on_break = False
 
 
 async def run_poll(scene, voice, brain, kick, state, benched, current):
@@ -275,6 +278,12 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None
 
     await speak("Hubie here. Grab a branch, we're playing some House originals in demo mode. Eighteen plus, zero real money.")
     while True:
+        if state.refresh_browser:                          # janitor asked for a fresh browser: do it between games
+            log("janitor_browser_refresh", reason=state.refresh_browser)
+            state.refresh_browser = None
+            janitor_clear_browser_cache()
+            await game.recover(hard=True)
+            state.last_round = time.time()
         note = ""
         req = None if state.pending else state.suggestions.take(benched)
         if state.pending and benched.get(state.pending[0], 0) < time.time():
@@ -312,11 +321,15 @@ async def director(scene, game, voice, brain, kick=None, chat_q=None, state=None
             try:
                 ev = await game.play_round()
                 fails = 0
+                state.last_round = time.time()
             except NonZeroBet as e:
                 log("STOP_NONZERO_BET", err=str(e))
                 scene.set_status("Taking a short break. Back soon.")
                 scene.react("sleepy", 3600, big=True)
-                await asyncio.sleep(3600)                    # never bet again this hour
+                state.on_break = True
+                await asyncio.sleep(3600)
+                state.on_break = False
+                state.last_round = time.time()                    # never bet again this hour
                 continue
             except Exception as e:
                 fails += 1
@@ -431,6 +444,85 @@ async def sync_check(streamer, every=300, scene=None):
         if backlog > 15:                          # nothing Hubie says is that long: something piled up
             MIXER.skip(int((backlog - 1) * 30))
             log("resync", dropped_audio_s=round(backlog - 1, 1))
+
+
+PROFILE = ROOT / "profile"
+HEARTBEAT = LOG_DIR / "heartbeat"
+
+
+def _chrome_rss_mb():
+    """Total memory of this user's Chrome processes, in MB (read from /proc)."""
+    total, uid = 0, os.getuid()
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            if os.stat(f"/proc/{pid}").st_uid != uid:
+                continue
+            with open(f"/proc/{pid}/comm") as f:
+                if "chrom" not in f.read():
+                    continue
+            with open(f"/proc/{pid}/status") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        total += int(line.split()[1])
+        except Exception:
+            pass
+    return total // 1024
+
+
+def janitor_clear_browser_cache():
+    """Delete Chrome's disk caches (NOT cookies/login) so they never fill the disk."""
+    import shutil
+    freed = 0
+    for pat in ("*/Cache", "*/Code Cache", "*/GPUCache", "*/Service Worker/CacheStorage", "*/DawnCache"):
+        for d in PROFILE.glob(pat):
+            try:
+                freed += sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+                shutil.rmtree(d, ignore_errors=True)
+            except Exception:
+                pass
+    log("janitor_cache_cleared", mb=freed // (1024 * 1024))
+
+
+async def janitor(state, every=600):
+    """Keeps a week-long stream healthy without anyone touching it:
+    - restarts the browser (between games) if Chrome's memory grows too big or it has run 12h, or if no
+      round has played for 10 minutes;
+    - frees disk space when it runs low (old logs, browser caches);
+    - writes a heartbeat file every 30s for the server watchdog (deploy/watchdog.sh), which restarts
+      Hubie if the app ever freezes without crashing."""
+    import shutil
+    browser_since = time.time()
+    tick = 0
+    while True:
+        await asyncio.sleep(30)
+        try:
+            HEARTBEAT.write_text(str(int(time.time())))
+        except Exception:
+            pass
+        tick += 30
+        if tick < every:
+            continue
+        tick = 0
+        mem = _chrome_rss_mb()
+        free_gb = shutil.disk_usage("/").free / 1e9
+        stalled = (not state.on_break) and time.time() - state.last_round > 600
+        log("janitor", chrome_mb=mem, disk_free_gb=round(free_gb, 1), browser_age_h=round((time.time() - browser_since) / 3600, 1),
+            stalled=stalled)
+        reason = None
+        if mem > 2500:
+            reason = f"chrome using {mem} MB"
+        elif time.time() - browser_since > 12 * 3600:
+            reason = "browser running 12h"
+        elif stalled:
+            reason = "no rounds for 10 minutes"
+        if reason and not state.refresh_browser:
+            state.refresh_browser = reason
+            browser_since = time.time()
+        if free_gb < 3:
+            for old in sorted(LOG_DIR.glob("hubie.jsonl.*.gz"))[1:]:
+                old.unlink(missing_ok=True)
+            janitor_clear_browser_cache()
+            log("janitor_disk_cleanup", free_gb=round(shutil.disk_usage("/").free / 1e9, 1))
 
 
 async def previewer(scene, every=30):
@@ -548,6 +640,7 @@ async def main(offline):
         log("kick_start_error", err=repr(e)[:200])
     tasks.append(asyncio.create_task(chat_worker(scene, voice, brain, kick, chat_q, state)))
     tasks.append(asyncio.create_task(human_inbox(scene, voice, brain, kick, state)))
+    tasks.append(asyncio.create_task(janitor(state)))
     tasks.append(asyncio.create_task(director(scene, game, voice, brain, kick, chat_q, state)))
     done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
     for t in done:
