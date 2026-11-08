@@ -452,7 +452,9 @@ HEARTBEAT = LOG_DIR / "heartbeat"
 
 
 def _chrome_rss_mb():
-    """Total memory of this user's Chrome processes, in MB (read from /proc)."""
+    """Real memory of this user's Chrome processes, in MB. Uses PSS (shared memory split between the
+    processes that share it): adding up RSS counts Chrome's shared memory once per process and reads
+    ~2.5x too high, which made the janitor restart a perfectly healthy browser every 10 minutes."""
     total, uid = 0, os.getuid()
     for pid in filter(str.isdigit, os.listdir("/proc")):
         try:
@@ -461,10 +463,11 @@ def _chrome_rss_mb():
             with open(f"/proc/{pid}/comm") as f:
                 if "chrom" not in f.read():
                     continue
-            with open(f"/proc/{pid}/status") as f:
+            with open(f"/proc/{pid}/smaps_rollup") as f:
                 for line in f:
-                    if line.startswith("VmRSS:"):
+                    if line.startswith("Pss:"):
                         total += int(line.split()[1])
+                        break
         except Exception:
             pass
     return total // 1024
@@ -510,7 +513,7 @@ async def janitor(state, every=600):
         log("janitor", chrome_mb=mem, disk_free_gb=round(free_gb, 1), browser_age_h=round((time.time() - browser_since) / 3600, 1),
             stalled=stalled)
         reason = None
-        if mem > 2500:
+        if mem > 2500 and time.time() - browser_since > 2 * 3600:
             reason = f"chrome using {mem} MB"
         elif time.time() - browser_since > 12 * 3600:
             reason = "browser running 12h"
