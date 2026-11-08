@@ -10,15 +10,15 @@ chats with viewers by name, moderates chat, and restarts himself when something 
 
 | Area | How |
 | --- | --- |
-| On screen | Animated Hubie (14 expression frames: two talking poses, picked per line; smooth lip sync from his live voice with auto-gain and blended mouth shapes; eyes that watch the game and look at viewers when he talks; confetti on big hits and streaks, blinks, breathing and sway, in his box he just chats (no reaction faces; set HUBIE_REACTIONS=full to bring them back), while the full-body pop-out moves carry the big expressions; seasonal sky that follows UTC day and night), the live game, recent results, chat, and a permanent 18+ / demo / gamble-responsibly banner |
-| Plays | Rotates every 8-15 min between House originals and strategies: Dice (1.5x / 2x / 10x / 50x), Limbo (2x-100x targets), Wheel (low/medium/high risk), Max Win, Plinko, Coinflip |
+| On screen | Hubie's cam runs on **real video loops** (Grok image-to-video, both of his looks): an idle loop (breathing, blinks, small head tilts, played forward and back so it never jumps) and a talking loop with natural head nods. **Lip sync follows his live voice**: every frame of the talking loop is measured for how open his mouth is, and the player keeps moving forward through the video while picking the frame whose mouth best matches the loudness of each moment. Short pauses stay in the talking loop on closed-mouth frames; switching to idle jumps to the frame where his head is in the same spot, so nothing ghosts. Plus the live game, recent results, chat, confetti on real big hits, a seasonal sky that follows UTC day and night, and a permanent 18+ / demo / gamble-responsibly banner |
+| Plays | Rotates every 8-15 min between House originals and strategies: Dice (1.5x / 2x / 10x / 50x), Limbo (2x-100x targets), Wheel (low/medium/high risk), Plinko, Coinflip. Max Win is left out of the rotation because its animations are too heavy for the headless browser (`HUBIE_DISABLED_GAMES`) |
 | Talks | Comments only on real moments (win streaks, long losing streaks, big hits, droughts ending, milestones), announces and recaps each segment, never leaves long dead air |
 | Chat | Reads Kick chat. Hubie speaks to first-time chatters and real questions; a separate 🤖 chat bot handles text replies and moderation notices. Chat picks the next game with `!play <game>`: the most-requested game comes up next, and a request cuts the current game short (after at least 3 minutes) so chat sees it happen. Follows, subs and gifted subs get a bot post and a spoken thank-you. Replies scale with chat speed: a quiet chat gets answered (but not the same person every line); a busy chat gets newcomers, questions and "Hubie" mentions only, capped per minute, so it never looks spammy |
 | Music | Original lo-fi background loops generated in code (no third-party tracks), low volume, ducks under Hubie's voice |
-| Pop-out moves | Viewers type `!dance`, `!wave`, `!flex`, `!nap`, `!hmm`, `!cheer`, `!snack`, `!lol`, `!dapper` (or `!commands` for the list) and a full-body Hubie springs up over the game to do the move, with a caption naming who asked and its own sound effect (a bloop as he pops up, then e.g. a dance groove, party horn, sad trombone, snores, munching). One at a time, short gap between moves, one per viewer per minute. New poses become new commands by adding an image to `art/hubie/body/` |
+| Pop-out moves | Viewers type `!dance`, `!wave`, `!hat`, `!flex`, `!nap`, `!hmm`, `!cheer`, `!facepalm`, `!snack`, `!lol`, `!dapper` (or `!commands` for the list) and a full-body Hubie springs up over the game and does the move as a **real animation** (each move is a short Grok video cut into transparent frames, quality-checked by Claude vision), with a caption naming who asked and its own sound effect. One at a time, short gap between moves, one per viewer per minute. New moves are made with `tools/grok_pose.py` and become commands automatically |
 | Moderates | Offensive, vulgar or rude messages are **deleted from Kick chat and the user is muted**, before they ever reach the screen, Hubie's brain or his voice. Two layers: instant word rules (slurs, threats, sexual content, swearing, insults, with leetspeak and stretched spellings), then an AI check (Claude) for disguised or rude messages the rules miss. Mutes escalate for repeat offenders (3x, then 24h). Offensive usernames are never shown or spoken. Also removes links, promo/referral spam, caps and repeat spam; answers "I'm under 18" with the 18+ rule |
 | Stays safe | Every line passes a filter that blocks win promises, deposit/bonus/code talk and money amounts; every bet is checked to be $0 before the click and again in the site's reply |
-| Runs itself | Restarts crashed parts on its own: the stream (ffmpeg), the game browser, the chat reader, the whole app; benches a game for an hour if it keeps failing |
+| Runs itself | Restarts crashed parts on its own (stream, game browser, chat reader, the whole app) and benches a game for an hour if it keeps failing. A janitor refreshes the browser when it bloats or stalls, clears caches and rotates logs; a server watchdog restarts Hubie if he ever freezes; voice and picture are re-synced every 5 minutes (see Self-maintenance) |
 
 ## Personality
 
@@ -79,7 +79,8 @@ stream key and a Kick developer app, an Anthropic API key, and a Housebets accou
 
 - **Model:** Claude Haiku 5.5 (Anthropic API) for personality, commentary and chat replies
 - **Voice:** Piper TTS (local, offline), voice `en_GB-northern_english_male-medium`, slowed to a relaxed sloth pace (`HUBIE_VOICE_SPEED`, optional `HUBIE_VOICE_PITCH`)
-- **Animation:** Pillow frame renderer; Hubie expression set generated with Google Gemini (Nano Banana) from the official Hubie picture, cut out of green screen; lip sync, blinks, breathing, sway and reactions animated in code
+- **Animation:** Pillow frame renderer. Hubie's look comes from the official Hubie picture: expression set generated with Google Gemini (Nano Banana), cam idle/talking loops and the 11 full-body moves generated as video with xAI Grok Imagine, all keyed off green screen in code; voice-driven lip sync picks video frames by measured mouth openness
+- **Quality check:** Claude vision reviews generated animations (same character, no leftover green, no broken limbs) before they go live (`tools/check_moves.py`)
 - **Game control:** Playwright + Chromium on Xvfb; results from the site's own bet API reply
 - **Streaming:** ffmpeg (libx264 + AAC) over RTMPS to Kick; voice mixed in-process, one audio chunk per video frame (no A/V drift)
 - **Chat:** Kick pop-out chat feed (read) + official Kick public API (send, timeouts), httpx
@@ -122,10 +123,13 @@ stream can grow into a fully official Hubie:
 - **Official art pack:** every expression and pose is a drop-in image (`art/hubie/` for the talking
   frames and moods, `art/hubie/body/` for full-body moves). Swap in official Housebets artwork and
   the cutout tool (`tools/cutout_body.py`) prepares it; nothing else changes.
-- **Rigged, fully animated Hubie:** replace the frame-based avatar with a rigged model (Live2D,
-  Spine or Rive) for smooth head turns, real phoneme lip shapes and in-between motion. The avatar
-  is one module (`hubie/avatar.py`) with a simple interface, so the renderer, moods and lip-sync
-  signal stay the same.
+- **Done during the contest:** Hubie's cam and all 11 moves already run on real video animation
+  (Grok image-to-video) with voice-matched lip sync.
+- **Next step, a rigged Hubie:** a rigged model (Live2D, Spine or Rive) would add true phoneme mouth
+  shapes and unlimited in-between motion. The avatar is one module (`hubie/avatar.py`) with a simple
+  interface, so the renderer, moods and lip-sync signal stay the same.
+- **Hubie learns new moves live:** the Grok pipeline + Claude quality gate could let chat suggest a
+  move, have Grok animate it and Claude approve it, with no human involved.
 - **More moves and moods:** each new full-body pose image becomes a new chat command
   automatically; more talking poses and phoneme mouth shapes (A/E/O/M/F) would sharpen the lip sync.
 - **Seasonal outfits:** the monthly theme system can also switch Hubie's outfit (winter scarf in
